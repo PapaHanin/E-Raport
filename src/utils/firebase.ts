@@ -70,7 +70,7 @@ export async function saveWorkspaceToFirestore(
   updatedBy: string = 'Administrator'
 ): Promise<string> {
   const firestore = getFirebaseDb();
-  const cleanId = workspaceId.trim() || 'SDN-01-MERDEKA-2025';
+  const cleanId = (workspaceId || '').trim().replace(/[/\\#?]/g, '-') || 'SDN-01-MERDEKA-2025';
   const nowStr = new Date().toISOString();
 
   const docRef = doc(firestore, 'workspaces', cleanId);
@@ -99,7 +99,7 @@ export async function loadWorkspaceFromFirestore(
   workspaceId: string
 ): Promise<{ data: SystemBackupData; updatedAt: string; updatedBy: string } | null> {
   const firestore = getFirebaseDb();
-  const cleanId = workspaceId.trim() || 'SDN-01-MERDEKA-2025';
+  const cleanId = (workspaceId || '').trim().replace(/[/\\#?]/g, '-') || 'SDN-01-MERDEKA-2025';
   const docRef = doc(firestore, 'workspaces', cleanId);
 
   const snap = await getDoc(docRef);
@@ -139,7 +139,7 @@ export function subscribeToWorkspace(
   onError?: (err: any) => void
 ): Unsubscribe {
   const firestore = getFirebaseDb();
-  const cleanId = workspaceId.trim() || 'SDN-01-MERDEKA-2025';
+  const cleanId = (workspaceId || '').trim().replace(/[/\\#?]/g, '-') || 'SDN-01-MERDEKA-2025';
   const docRef = doc(firestore, 'workspaces', cleanId);
 
   return onSnapshot(

@@ -13,25 +13,18 @@ service cloud.firestore {
     function isValidWorkspace(data) {
       return data.workspaceId is string &&
              data.workspaceId.size() > 0 &&
-             data.workspaceId.size() <= 128 &&
-             data.updatedAt is string &&
-             data.updatedAt.size() <= 100;
+             data.workspaceId.size() <= 128;
     }
 
     function isValidAuditLog(data) {
       return data.id is string &&
              data.timestamp is string &&
-             data.userName is string &&
              data.action is string;
     }
 
     function isValidOgomojoloAttendance(data) {
-      return data.nisn is string &&
-             data.nisn.size() > 0 &&
-             data.nisn.size() <= 64 &&
-             data.namaSiswa is string &&
-             data.namaSiswa.size() > 0 &&
-             data.namaSiswa.size() <= 200;
+      return (data.nisn is string || data.nisn is int || !('nisn' in data)) &&
+             (data.namaSiswa is string || !('namaSiswa' in data));
     }
 
     // Default deny all other paths
@@ -46,22 +39,22 @@ service cloud.firestore {
 
     // Workspaces collection
     match /workspaces/{workspaceId} {
-      allow read: if isValidId(workspaceId);
-      allow create, update: if isValidId(workspaceId) && isValidWorkspace(incoming());
-      allow delete: if isValidId(workspaceId);
+      allow get, list: if true;
+      allow create, update: if isValidWorkspace(incoming());
+      allow delete: if true;
 
       match /audit_logs/{logId} {
-        allow read: if isValidId(workspaceId) && isValidId(logId);
-        allow create, update: if isValidId(workspaceId) && isValidId(logId) && isValidAuditLog(incoming());
-        allow delete: if isValidId(workspaceId) && isValidId(logId);
+        allow get, list: if true;
+        allow create, update: if isValidAuditLog(incoming());
+        allow delete: if true;
       }
     }
 
     // Shared Ogomojolo Attendance integration collection
     match /rekap_absensi_ogomojolo/{recordId} {
-      allow read: if isValidId(recordId);
-      allow create, update: if isValidId(recordId) && isValidOgomojoloAttendance(incoming());
-      allow delete: if isValidId(recordId);
+      allow get, list: if true;
+      allow create, update: if isValidOgomojoloAttendance(incoming());
+      allow delete: if true;
     }
   }
 }
