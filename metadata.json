@@ -1,0 +1,6 @@
+{
+  "name": "iihh Beres",
+  "description": "Sistem Penilaian & E-Rapor Kurikulum Merdeka Sekolah Dasar dengan AI Generator Narasi Rapor Otomatis",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

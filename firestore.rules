@@ -1,0 +1,67 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function isValidWorkspace(data) {
+      return data.workspaceId is string &&
+             data.workspaceId.size() > 0 &&
+             data.workspaceId.size() <= 128 &&
+             data.updatedAt is string &&
+             data.updatedAt.size() <= 100;
+    }
+
+    function isValidAuditLog(data) {
+      return data.id is string &&
+             data.timestamp is string &&
+             data.userName is string &&
+             data.action is string;
+    }
+
+    function isValidOgomojoloAttendance(data) {
+      return data.nisn is string &&
+             data.nisn.size() > 0 &&
+             data.nisn.size() <= 64 &&
+             data.namaSiswa is string &&
+             data.namaSiswa.size() > 0 &&
+             data.namaSiswa.size() <= 200;
+    }
+
+    // Default deny all other paths
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Connection test document
+    match /test/{testId} {
+      allow read, write: if true;
+    }
+
+    // Workspaces collection
+    match /workspaces/{workspaceId} {
+      allow read: if isValidId(workspaceId);
+      allow create, update: if isValidId(workspaceId) && isValidWorkspace(incoming());
+      allow delete: if isValidId(workspaceId);
+
+      match /audit_logs/{logId} {
+        allow read: if isValidId(workspaceId) && isValidId(logId);
+        allow create, update: if isValidId(workspaceId) && isValidId(logId) && isValidAuditLog(incoming());
+        allow delete: if isValidId(workspaceId) && isValidId(logId);
+      }
+    }
+
+    // Shared Ogomojolo Attendance integration collection
+    match /rekap_absensi_ogomojolo/{recordId} {
+      allow read: if isValidId(recordId);
+      allow create, update: if isValidId(recordId) && isValidOgomojoloAttendance(incoming());
+      allow delete: if isValidId(recordId);
+    }
+  }
+}

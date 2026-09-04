@@ -1,0 +1,69 @@
+{
+  "entities": {
+    "schoolData": {
+      "title": "SchoolData",
+      "description": "Centralized e-Rapor workspace document containing school profile, student roster, subjects, grades, and configuration",
+      "type": "object",
+      "properties": {
+        "workspaceId": { "type": "string" },
+        "schoolProfile": { "type": "object" },
+        "students": { "type": "array" },
+        "subjects": { "type": "array" },
+        "grades": { "type": "array" },
+        "raporDetails": { "type": "object" },
+        "p5Projects": { "type": "array" },
+        "p5Scores": { "type": "array" },
+        "teachers": { "type": "array" },
+        "updatedAt": { "type": "string" },
+        "updatedBy": { "type": "string" }
+      },
+      "required": ["workspaceId", "updatedAt"]
+    },
+    "auditLogs": {
+      "title": "AuditLog",
+      "description": "Activity audit log record",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "timestamp": { "type": "string" },
+        "userName": { "type": "string" },
+        "userRole": { "type": "string" },
+        "action": { "type": "string" },
+        "details": { "type": "string" }
+      },
+      "required": ["id", "timestamp", "userName", "action"]
+    },
+    "ogomojoloAttendance": {
+      "title": "OgomojoloAttendance",
+      "description": "Student attendance summary synced from SDK Ogomojolo attendance app",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "nisn": { "type": "string" },
+        "namaSiswa": { "type": "string" },
+        "kelas": { "type": "string" },
+        "semester": { "type": "integer" },
+        "tahunAjaran": { "type": "string" },
+        "sakit": { "type": "integer" },
+        "izin": { "type": "integer" },
+        "tanpaKeterangan": { "type": "integer" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["nisn", "namaSiswa", "kelas"]
+    }
+  },
+  "firestore": {
+    "/workspaces/{workspaceId}": {
+      "schema": "schoolData",
+      "description": "Collection of school workspaces for real-time multi-device synchronization"
+    },
+    "/workspaces/{workspaceId}/audit_logs/{logId}": {
+      "schema": "auditLogs",
+      "description": "Audit logs for operations performed in the workspace"
+    },
+    "/rekap_absensi_ogomojolo/{recordId}": {
+      "schema": "ogomojoloAttendance",
+      "description": "Shared attendance summary collection written by SDK Ogomojolo and consumed by e-Rapor"
+    }
+  }
+}
