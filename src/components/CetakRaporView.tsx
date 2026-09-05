@@ -71,6 +71,7 @@ interface CetakRaporViewProps {
   onUpdateStudent?: (student: Student) => void;
   onUpdateSchoolProfile?: (profile: SchoolProfile) => void;
   onRegisterStudentsFromOgomojolo?: (students: Student[], raporDetails: Record<string, RaporSiswaDetail>) => void;
+  onSyncAllFromOgomojolo?: (students: Student[], raporDetails: Record<string, RaporSiswaDetail>, newStudentsAdded: Student[]) => void;
   onClearAllDummyData?: () => void;
 }
 
@@ -94,6 +95,7 @@ export const CetakRaporView: React.FC<CetakRaporViewProps> = ({
   onUpdateStudent,
   onUpdateSchoolProfile,
   onRegisterStudentsFromOgomojolo,
+  onSyncAllFromOgomojolo,
   onClearAllDummyData,
 }) => {
   const classLevels: ClassLevel[] = ['Kelas 1', 'Kelas 2', 'Kelas 3', 'Kelas 4', 'Kelas 5', 'Kelas 6'];
@@ -1749,6 +1751,15 @@ export const CetakRaporView: React.FC<CetakRaporViewProps> = ({
           isOpen={isOgomojoloModalOpen}
           onClose={() => setIsOgomojoloModalOpen(false)}
           onRegisterStudentsFromOgomojolo={onRegisterStudentsFromOgomojolo}
+          onSyncAllFromOgomojolo={(updatedStudents, updatedDetails, newStudentsAdded) => {
+            if (onSyncAllFromOgomojolo) {
+              onSyncAllFromOgomojolo(updatedStudents, updatedDetails, newStudentsAdded);
+            } else if (onRegisterStudentsFromOgomojolo) {
+              onRegisterStudentsFromOgomojolo(updatedStudents, updatedDetails);
+            }
+            setPrintSuccessToast(`Alhamdulillah! Berhasil menyalin ${updatedStudents.length} seluruh data siswa & absensi dari SDK Ogomojolo!`);
+            setTimeout(() => setPrintSuccessToast(null), 3500);
+          }}
           onClearAllDummyData={onClearAllDummyData}
           onApplyRaporDetails={(newDetails, count) => {
             if (onUpdateAllRaporDetails) {

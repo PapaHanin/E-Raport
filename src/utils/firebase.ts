@@ -205,6 +205,7 @@ export const OGOMOJOLO_COLLECTION_NAME = 'rekap_absensi_ogomojolo';
 
 /**
  * Fetches all attendance records from shared collection 'rekap_absensi_ogomojolo'
+ * and extracts both attendance figures and complete student profile information.
  */
 export async function fetchOgomojoloAttendanceRecords(): Promise<OgomojoloAttendanceRecord[]> {
   const firestore = getFirebaseDb();
@@ -213,11 +214,24 @@ export async function fetchOgomojoloAttendanceRecords(): Promise<OgomojoloAttend
   const records: OgomojoloAttendanceRecord[] = [];
   snapshot.forEach((d) => {
     const data = d.data() as any;
+    const rawNisn = String(data.nisn ?? data.NISN ?? d.id ?? '').trim();
+    const rawNama = String(data.namaSiswa ?? data.nama ?? data.name ?? data.studentName ?? '').trim();
+    const rawNis = String(data.nis ?? data.NIS ?? '').trim();
+    const rawJk = String(data.gender ?? data.jenisKelamin ?? data.jk ?? data.sex ?? '').toUpperCase();
+    const gender: 'L' | 'P' = rawJk.startsWith('P') ? 'P' : 'L';
+    const parentName = String(data.parentName ?? data.namaOrtu ?? data.namaAyah ?? data.namaIbu ?? '').trim();
+    const parentPhone = String(data.parentPhone ?? data.noHp ?? data.telepon ?? '').trim();
+    const address = String(data.address ?? data.alamat ?? '').trim();
+    const birthDate = String(data.birthDate ?? data.tanggalLahir ?? '').trim();
+    const birthPlace = String(data.birthPlace ?? data.tempatLahir ?? '').trim();
+    const nik = String(data.nik ?? data.NIK ?? '').trim();
+    const religion = data.religion ?? data.agama;
+
     records.push({
       id: d.id,
-      nisn: data.nisn || '',
-      namaSiswa: data.namaSiswa || '',
-      kelas: data.kelas || '',
+      nisn: rawNisn,
+      namaSiswa: rawNama || `Siswa ${d.id}`,
+      kelas: String(data.kelas ?? data.rombel ?? data.gradeLevel ?? '').trim(),
       semester: data.semester ?? 1,
       tahunAjaran: data.tahunAjaran || '',
       sakit: typeof data.kehadiran?.sakit === 'number' ? data.kehadiran.sakit : (Number(data.sakit) || 0),
@@ -225,13 +239,30 @@ export async function fetchOgomojoloAttendanceRecords(): Promise<OgomojoloAttend
       tanpaKeterangan: typeof data.kehadiran?.tanpaKeterangan === 'number' ? data.kehadiran.tanpaKeterangan : (Number(data.tanpaKeterangan) || 0),
       updatedAt: data.updatedAt || new Date().toISOString(),
       catatan: data.catatan || '',
+      nis: rawNis,
+      gender,
+      jenisKelamin: gender,
+      jk: gender,
+      parentName: parentName || 'Orang Tua / Wali Murid',
+      namaOrtu: parentName || 'Orang Tua / Wali Murid',
+      parentPhone: parentPhone || '081234567890',
+      noHp: parentPhone || '081234567890',
+      address: address || 'Alamat Siswa',
+      alamat: address || 'Alamat Siswa',
+      birthDate,
+      tanggalLahir: birthDate,
+      birthPlace,
+      tempatLahir: birthPlace,
+      nik,
+      religion,
+      agama: religion,
     });
   });
   return records;
 }
 
 /**
- * Saves or updates a student attendance record in 'rekap_absensi_ogomojolo'
+ * Saves or updates a student attendance and profile record in 'rekap_absensi_ogomojolo'
  */
 export async function saveOgomojoloAttendanceRecord(record: OgomojoloAttendanceRecord): Promise<void> {
   const firestore = getFirebaseDb();
@@ -256,6 +287,16 @@ export async function saveOgomojoloAttendanceRecord(record: OgomojoloAttendanceR
     },
     updatedAt: nowStr,
     catatan: record.catatan || '',
+    nis: record.nis || '',
+    gender: record.gender || 'L',
+    jenisKelamin: record.gender || 'L',
+    parentName: record.parentName || record.namaOrtu || '',
+    parentPhone: record.parentPhone || record.noHp || '',
+    address: record.address || record.alamat || '',
+    birthDate: record.birthDate || record.tanggalLahir || '',
+    birthPlace: record.birthPlace || record.tempatLahir || '',
+    nik: record.nik || '',
+    religion: record.religion || record.agama || '',
   }, { merge: true });
 }
 
@@ -287,6 +328,16 @@ export async function pushBatchOgomojoloAttendance(records: OgomojoloAttendanceR
       },
       updatedAt: nowStr,
       catatan: record.catatan || '',
+      nis: record.nis || '',
+      gender: record.gender || 'L',
+      jenisKelamin: record.gender || 'L',
+      parentName: record.parentName || record.namaOrtu || '',
+      parentPhone: record.parentPhone || record.noHp || '',
+      address: record.address || record.alamat || '',
+      birthDate: record.birthDate || record.tanggalLahir || '',
+      birthPlace: record.birthPlace || record.tempatLahir || '',
+      nik: record.nik || '',
+      religion: record.religion || record.agama || '',
     }, { merge: true });
   }
 
@@ -295,7 +346,7 @@ export async function pushBatchOgomojoloAttendance(records: OgomojoloAttendanceR
 }
 
 /**
- * Real-time listener for incoming attendance updates from SDK Ogomojolo
+ * Real-time listener for incoming attendance and student profile updates from SDK Ogomojolo
  */
 export function subscribeToOgomojoloAttendance(
   onUpdate: (records: OgomojoloAttendanceRecord[]) => void,
@@ -310,11 +361,24 @@ export function subscribeToOgomojoloAttendance(
       const records: OgomojoloAttendanceRecord[] = [];
       snap.forEach((d) => {
         const data = d.data() as any;
+        const rawNisn = String(data.nisn ?? data.NISN ?? d.id ?? '').trim();
+        const rawNama = String(data.namaSiswa ?? data.nama ?? data.name ?? data.studentName ?? '').trim();
+        const rawNis = String(data.nis ?? data.NIS ?? '').trim();
+        const rawJk = String(data.gender ?? data.jenisKelamin ?? data.jk ?? data.sex ?? '').toUpperCase();
+        const gender: 'L' | 'P' = rawJk.startsWith('P') ? 'P' : 'L';
+        const parentName = String(data.parentName ?? data.namaOrtu ?? data.namaAyah ?? data.namaIbu ?? '').trim();
+        const parentPhone = String(data.parentPhone ?? data.noHp ?? data.telepon ?? '').trim();
+        const address = String(data.address ?? data.alamat ?? '').trim();
+        const birthDate = String(data.birthDate ?? data.tanggalLahir ?? '').trim();
+        const birthPlace = String(data.birthPlace ?? data.tempatLahir ?? '').trim();
+        const nik = String(data.nik ?? data.NIK ?? '').trim();
+        const religion = data.religion ?? data.agama;
+
         records.push({
           id: d.id,
-          nisn: data.nisn || '',
-          namaSiswa: data.namaSiswa || '',
-          kelas: data.kelas || '',
+          nisn: rawNisn,
+          namaSiswa: rawNama || `Siswa ${d.id}`,
+          kelas: String(data.kelas ?? data.rombel ?? data.gradeLevel ?? '').trim(),
           semester: data.semester ?? 1,
           tahunAjaran: data.tahunAjaran || '',
           sakit: typeof data.kehadiran?.sakit === 'number' ? data.kehadiran.sakit : (Number(data.sakit) || 0),
@@ -322,6 +386,23 @@ export function subscribeToOgomojoloAttendance(
           tanpaKeterangan: typeof data.kehadiran?.tanpaKeterangan === 'number' ? data.kehadiran.tanpaKeterangan : (Number(data.tanpaKeterangan) || 0),
           updatedAt: data.updatedAt || new Date().toISOString(),
           catatan: data.catatan || '',
+          nis: rawNis,
+          gender,
+          jenisKelamin: gender,
+          jk: gender,
+          parentName: parentName || 'Orang Tua / Wali Murid',
+          namaOrtu: parentName || 'Orang Tua / Wali Murid',
+          parentPhone: parentPhone || '081234567890',
+          noHp: parentPhone || '081234567890',
+          address: address || 'Alamat Siswa',
+          alamat: address || 'Alamat Siswa',
+          birthDate,
+          tanggalLahir: birthDate,
+          birthPlace,
+          tempatLahir: birthPlace,
+          nik,
+          religion,
+          agama: religion,
         });
       });
       onUpdate(records);
@@ -331,6 +412,179 @@ export function subscribeToOgomojoloAttendance(
       if (onError) onError(err);
     }
   );
+}
+
+/**
+ * Normalizes class strings (e.g. "Kelas 4", "4", "4A", "kelas 4") for resilient matching.
+ */
+function normalizeClassKey(c?: string): string {
+  if (!c) return '';
+  const digits = c.replace(/[^0-9]/g, '');
+  if (digits) return `kelas ${digits}`;
+  return c.trim().toLowerCase();
+}
+
+/**
+ * FULL DATA SYNCHRONIZATION:
+ * Copies BOTH all student profile data (name, NISN, NIS, gender, address, parents, etc.)
+ * AND attendance data (sakit, izin, alpa) from SDK Ogomojolo records into e-Rapor.
+ *
+ * - Existing students: profile details are updated and attendance is synchronized.
+ * - New students from Ogomojolo: automatically appended to the students list with full profile details.
+ */
+export function syncAllOgomojoloData(
+  records: OgomojoloAttendanceRecord[],
+  currentStudents: Student[],
+  currentRaporDetails: Record<string, RaporSiswaDetail>,
+  targetClassLevel?: ClassLevel
+): {
+  updatedStudents: Student[];
+  updatedRaporDetails: Record<string, RaporSiswaDetail>;
+  newStudents: Student[];
+  updatedExistingCount: number;
+  newStudentsCount: number;
+  totalCount: number;
+  syncedStudentNames: string[];
+} {
+  const normTarget = normalizeClassKey(targetClassLevel);
+  
+  // Filter records that match target class, or accept all if record has no class specified
+  const targetRecords = records.filter((r) => {
+    if (!r.kelas || !r.kelas.trim()) return true;
+    if (!normTarget) return true;
+    const normRecord = normalizeClassKey(r.kelas);
+    return normRecord === normTarget || r.kelas.toLowerCase().includes(normTarget);
+  });
+
+  const updatedStudents = [...currentStudents];
+  const updatedRaporDetails = { ...currentRaporDetails };
+  const newStudents: Student[] = [];
+  const syncedStudentNames: string[] = [];
+  let updatedExistingCount = 0;
+  let newStudentsCount = 0;
+
+  targetRecords.forEach((record, idx) => {
+    const cleanRecordNisn = (record.nisn || '').trim();
+    const cleanRecordNis = (record.nis || '').trim();
+    const cleanRecordName = (record.namaSiswa || '').trim().toLowerCase();
+
+    // 1. Check if student already exists in currentStudents
+    let studentIndex = -1;
+
+    if (cleanRecordNisn) {
+      studentIndex = updatedStudents.findIndex(
+        (s) => s.nisn && s.nisn.trim() === cleanRecordNisn
+      );
+    }
+    if (studentIndex === -1 && cleanRecordNis) {
+      studentIndex = updatedStudents.findIndex(
+        (s) => s.nis && s.nis.trim() === cleanRecordNis
+      );
+    }
+    if (studentIndex === -1 && cleanRecordName) {
+      studentIndex = updatedStudents.findIndex(
+        (s) => s.name && s.name.trim().toLowerCase() === cleanRecordName
+      );
+    }
+
+    if (studentIndex >= 0) {
+      // Existing student: UPDATE profile data with data from Ogomojolo
+      const existing = updatedStudents[studentIndex];
+      const updated: Student = {
+        ...existing,
+        name: record.namaSiswa.trim() || existing.name,
+        nisn: cleanRecordNisn || existing.nisn,
+        nis: cleanRecordNis || existing.nis || (cleanRecordNisn ? cleanRecordNisn.slice(-4) : existing.nis),
+        gender: record.gender || existing.gender || 'L',
+        parentName: record.parentName || record.namaOrtu || existing.parentName || 'Orang Tua / Wali Murid',
+        parentPhone: record.parentPhone || record.noHp || existing.parentPhone || '081234567890',
+        address: record.address || record.alamat || existing.address || 'Alamat Siswa',
+        birthDate: record.birthDate || record.tanggalLahir || existing.birthDate,
+        birthPlace: record.birthPlace || record.tempatLahir || existing.birthPlace,
+        nik: record.nik || existing.nik,
+        religion: (record.religion || record.agama || existing.religion) as any,
+        gradeLevel: targetClassLevel || existing.gradeLevel,
+        fase: getFaseByClass(targetClassLevel || existing.gradeLevel),
+      };
+
+      updatedStudents[studentIndex] = updated;
+      updatedExistingCount++;
+      syncedStudentNames.push(updated.name);
+
+      // Update Attendance in Rapor Details
+      const prevDetail = updatedRaporDetails[existing.id] || {
+        studentId: existing.id,
+        catatanWaliKelas: 'Menunjukkan perkembangan belajar dan keaktifan yang baik selama semester.',
+        statusKenaikan: 'Naik ke Kelas Berikutnya',
+        ekstrakurikuler: [
+          { id: 'ekskul-1', name: 'Pramuka', predicate: 'Baik', description: 'Aktif mengikuti kegiatan rutin kepramukaan.' }
+        ],
+        presensi: { sakit: 0, izin: 0, tanpaKeterangan: 0 },
+      };
+
+      updatedRaporDetails[existing.id] = {
+        ...prevDetail,
+        presensi: {
+          sakit: Number(record.sakit) || 0,
+          izin: Number(record.izin) || 0,
+          tanpaKeterangan: Number(record.tanpaKeterangan) || 0,
+        },
+      };
+    } else {
+      // New student: ADD to students array with full profile
+      const newId = cleanRecordNisn 
+        ? `std-${cleanRecordNisn.replace(/[^a-zA-Z0-9]/g, '')}` 
+        : `std-og-${Date.now()}-${idx + 1}`;
+      const gradeLevel = targetClassLevel || (record.kelas as ClassLevel) || 'Kelas 4';
+
+      const newStudent: Student = {
+        id: newId,
+        nisn: cleanRecordNisn || `00${idx + 7890123}`,
+        nis: cleanRecordNis || (cleanRecordNisn ? cleanRecordNisn.slice(-4) : `240${idx + 1}`),
+        name: record.namaSiswa.trim(),
+        gender: record.gender || 'L',
+        gradeLevel: gradeLevel,
+        fase: getFaseByClass(gradeLevel),
+        parentName: record.parentName || record.namaOrtu || 'Orang Tua / Wali Murid',
+        parentPhone: record.parentPhone || record.noHp || '081234567890',
+        address: record.address || record.alamat || 'Alamat Siswa',
+        birthDate: record.birthDate || record.tanggalLahir || '2015-05-12',
+        birthPlace: record.birthPlace || record.tempatLahir || 'Kota Sekolah',
+        nik: record.nik || '',
+        religion: (record.religion || record.agama || 'Islam') as any,
+      };
+
+      updatedStudents.push(newStudent);
+      newStudents.push(newStudent);
+      newStudentsCount++;
+      syncedStudentNames.push(newStudent.name);
+
+      // Create initial Rapor Details with presensi
+      updatedRaporDetails[newId] = {
+        studentId: newId,
+        catatanWaliKelas: 'Menunjukkan perkembangan belajar dan keaktifan yang baik selama semester.',
+        statusKenaikan: 'Naik ke Kelas Berikutnya',
+        ekstrakurikuler: [
+          { id: 'ekskul-1', name: 'Pramuka', predicate: 'Baik', description: 'Aktif mengikuti kegiatan rutin kepramukaan.' }
+        ],
+        presensi: {
+          sakit: Number(record.sakit) || 0,
+          izin: Number(record.izin) || 0,
+          tanpaKeterangan: Number(record.tanpaKeterangan) || 0,
+        },
+      };
+    }
+  });
+
+  return {
+    updatedStudents,
+    updatedRaporDetails,
+    newStudents,
+    updatedExistingCount,
+    newStudentsCount,
+    totalCount: updatedExistingCount + newStudentsCount,
+    syncedStudentNames,
+  };
 }
 
 /**
@@ -422,20 +676,24 @@ export function convertOgomojoloToStudents(
 
   targetRecords.forEach((r, idx) => {
     const cleanNisn = (r.nisn || '').trim();
-    const studentId = cleanNisn ? `std-${cleanNisn}` : `std-og-${idx + 1}`;
+    const studentId = cleanNisn ? `std-${cleanNisn.replace(/[^a-zA-Z0-9]/g, '')}` : `std-og-${idx + 1}`;
     const gradeLevel = (r.kelas as ClassLevel) || targetClassLevel || 'Kelas 4';
 
     students.push({
       id: studentId,
       nisn: cleanNisn || `00${idx + 10000000}`,
-      nis: cleanNisn ? cleanNisn.slice(-4) : `240${idx + 1}`,
+      nis: r.nis || (cleanNisn ? cleanNisn.slice(-4) : `240${idx + 1}`),
       name: r.namaSiswa.trim(),
-      gender: 'L',
+      gender: r.gender || (r.jenisKelamin?.toUpperCase().startsWith('P') ? 'P' : 'L'),
       gradeLevel: gradeLevel,
       fase: getFaseByClass(gradeLevel),
-      parentName: 'Orang Tua / Wali Murid',
-      parentPhone: '081234567890',
-      address: 'Alamat Siswa',
+      parentName: r.parentName || r.namaOrtu || 'Orang Tua / Wali Murid',
+      parentPhone: r.parentPhone || r.noHp || '081234567890',
+      address: r.address || r.alamat || 'Alamat Siswa',
+      birthDate: r.birthDate || r.tanggalLahir || '2015-05-12',
+      birthPlace: r.birthPlace || r.tempatLahir || 'Kota Sekolah',
+      nik: r.nik || '',
+      religion: (r.religion || r.agama || 'Islam') as any,
     });
 
     raporDetails[studentId] = {

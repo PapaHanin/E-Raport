@@ -40,6 +40,7 @@ interface CloudSyncViewProps {
   schoolProfile: SchoolProfile;
   onApplyCloudData: (cloudData: SystemBackupData) => void;
   onRegisterStudentsFromOgomojolo?: (students: any[], raporDetails: Record<string, any>) => void;
+  onSyncAllFromOgomojolo?: (students: any[], raporDetails: Record<string, any>, newStudentsAdded: any[]) => void;
   onClearAllDummyData?: () => void;
 }
 
@@ -50,6 +51,7 @@ export const CloudSyncView: React.FC<CloudSyncViewProps> = ({
   schoolProfile,
   onApplyCloudData,
   onRegisterStudentsFromOgomojolo,
+  onSyncAllFromOgomojolo,
   onClearAllDummyData,
 }) => {
   const [workspaceId, setWorkspaceId] = useState<string>(() => {
@@ -469,6 +471,14 @@ Sekolah: ${schoolProfile.schoolName}`;
           isOpen={isOgomojoloModalOpen}
           onClose={() => setIsOgomojoloModalOpen(false)}
           onRegisterStudentsFromOgomojolo={onRegisterStudentsFromOgomojolo}
+          onSyncAllFromOgomojolo={(updatedStudents, newDetails, newStudentsAdded) => {
+            if (onSyncAllFromOgomojolo) {
+              onSyncAllFromOgomojolo(updatedStudents, newDetails, newStudentsAdded);
+            } else if (onRegisterStudentsFromOgomojolo) {
+              onRegisterStudentsFromOgomojolo(updatedStudents, newDetails);
+            }
+            showToast(`Berhasil menyalin ${updatedStudents.length} seluruh data siswa & kehadiran dari SDK Ogomojolo!`, 'success');
+          }}
           onClearAllDummyData={onClearAllDummyData}
           onApplyRaporDetails={(newDetails, count) => {
             onApplyCloudData({

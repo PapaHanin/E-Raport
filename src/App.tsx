@@ -376,6 +376,54 @@ export function App() {
     logAudit('Sinkron Ogomojolo', `Mendaftarkan ${newStudents.length} siswa dan menyelaraskan absensi dari SDK Ogomojolo`);
   };
 
+  // Synchronize ALL student profile data AND attendance records from Ogomojolo SDK
+  const handleSyncAllFromOgomojolo = (
+    updatedStudents: Student[],
+    updatedDetails: Record<string, RaporSiswaDetail>,
+    newStudentsAdded: Student[]
+  ) => {
+    setStudents(updatedStudents);
+    setRaporDetails(updatedDetails);
+
+    if (newStudentsAdded.length > 0) {
+      setGrades((prev) => {
+        const existingGradeKeys = new Set(prev.map((g) => `${g.studentId}_${g.subjectId}`));
+        const newGradeEntries: NilaiSiswaMapel[] = [];
+        newStudentsAdded.forEach((std) => {
+          subjects.forEach((subj) => {
+            const key = `${std.id}_${subj.id}`;
+            if (!existingGradeKeys.has(key)) {
+              newGradeEntries.push({
+                studentId: std.id,
+                subjectId: subj.id,
+                formatifScores: [80, 85],
+                formatifNotes: 'Pengamatan harian dan keaktifan',
+                sumatifLM: (subj.tujuanPembelajaran || []).map((tp) => ({
+                  tpId: tp.id,
+                  tpCode: tp.code || 'TP',
+                  tpDescription: tp.description,
+                  score: 80,
+                })),
+                sumatifSAS: 80,
+                rataRataLM: 80,
+                nilaiAkhir: 80,
+                predikat: 'Baik',
+                narasiRapor: `Ananda ${std.name} menunjukkan penguasaan yang baik pada mata pelajaran ${subj.name}.`,
+                isAIGenerated: false,
+              });
+            }
+          });
+        });
+        return [...prev, ...newGradeEntries];
+      });
+    }
+
+    logAudit(
+      'Sinkron Ogomojolo',
+      `Menyalin seluruh data siswa (${updatedStudents.length} siswa) dan kehadiran dari SDK Ogomojolo`
+    );
+  };
+
   // Completely wipe all dummy/local data for a fresh clean start
   const handleClearAllData = () => {
     localStorage.removeItem('iihh_students');
@@ -598,6 +646,7 @@ export function App() {
               onUpdateStudent={handleUpdateStudent}
               onUpdateSchoolProfile={setSchoolProfile}
               onRegisterStudentsFromOgomojolo={handleRegisterStudentsFromOgomojolo}
+              onSyncAllFromOgomojolo={handleSyncAllFromOgomojolo}
               onClearAllDummyData={handleClearAllData}
             />
           )}
@@ -689,6 +738,7 @@ export function App() {
               schoolProfile={schoolProfile}
               onApplyCloudData={handleImportFullBackup}
               onRegisterStudentsFromOgomojolo={handleRegisterStudentsFromOgomojolo}
+              onSyncAllFromOgomojolo={handleSyncAllFromOgomojolo}
               onClearAllDummyData={handleClearAllData}
             />
           )}

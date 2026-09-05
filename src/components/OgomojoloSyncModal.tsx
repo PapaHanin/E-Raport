@@ -25,12 +25,14 @@ import {
   Info,
   UserPlus,
   Trash2,
+  Users,
 } from 'lucide-react';
 import {
   fetchOgomojoloAttendanceRecords,
   pushBatchOgomojoloAttendance,
   syncOgomojoloToRaporDetails,
   convertOgomojoloToStudents,
+  syncAllOgomojoloData,
   OGOMOJOLO_COLLECTION_NAME,
 } from '../utils/firebase';
 
@@ -43,6 +45,7 @@ interface OgomojoloSyncModalProps {
   onClose: () => void;
   onApplyRaporDetails: (newDetails: Record<string, RaporSiswaDetail>, count: number) => void;
   onRegisterStudentsFromOgomojolo?: (newStudents: Student[], newRaporDetails: Record<string, RaporSiswaDetail>) => void;
+  onSyncAllFromOgomojolo?: (updatedStudents: Student[], updatedRaporDetails: Record<string, RaporSiswaDetail>, newStudentsAdded: Student[]) => void;
   onClearAllDummyData?: () => void;
 }
 
@@ -55,32 +58,41 @@ export const OgomojoloSyncModal: React.FC<OgomojoloSyncModalProps> = ({
   onClose,
   onApplyRaporDetails,
   onRegisterStudentsFromOgomojolo,
+  onSyncAllFromOgomojolo,
   onClearAllDummyData,
 }) => {
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [isSimulating, setIsSimulating] = useState<boolean>(false);
   const [records, setRecords] = useState<OgomojoloAttendanceRecord[]>([]);
   const [copiedPrompt, setCopiedPrompt] = useState<boolean>(false);
-  const [copiedConfig, setCopiedConfig] = useState<boolean>(false);
   const [statusMessage, setStatusMessage] = useState<{ text: string; type: 'success' | 'info' | 'error' } | null>(null);
   const [showClearConfirm, setShowClearConfirm] = useState<boolean>(false);
 
   const classStudents = students.filter((s) => s.gradeLevel === activeClassLevel);
 
-  const promptText = `Tolong buatkan fitur pengiriman rekap kehadiran siswa ke aplikasi e-Rapor Merdeka (iihh Beres) melalui Google Cloud Firestore.
+  const promptText = `Tolong buatkan fitur pengiriman seluruh data siswa dan rekap kehadiran siswa dari aplikasi SDK Ogomojolo ke aplikasi e-Rapor Merdeka (iihh Beres) melalui Google Cloud Firestore.
 
 Gunakan konfigurasi Firebase yang sama:
 - Project ID: reliable-enigma-s1ttq
 - Database ID: ai-studio-iihhberes-db02674d-a027-43d4-b17e-50573c47075a
 - Koleksi Firestore: "rekap_absensi_ogomojolo"
 
-Pada aplikasi SDK Ogomojolo ini, buatkan tombol "Kirim Rekap ke e-Rapor" yang menghitung total Sakit, Izin, dan Tanpa Keterangan tiap siswa sepanjang semester, lalu simpan dokumen ke koleksi "rekap_absensi_ogomojolo" dengan ID dokumen = NISN siswa:
+Pada aplikasi SDK Ogomojolo ini, buatkan tombol "Kirim Data Siswa & Rekap ke e-Rapor" yang mengumpulkan profil lengkap siswa (Nama, NISN, NIS, Jenis Kelamin, Orang Tua, HP, Alamat) beserta total Sakit, Izin, dan Tanpa Keterangan tiap siswa, lalu simpan dokumen ke koleksi "rekap_absensi_ogomojolo" dengan ID dokumen = NISN siswa:
 {
   "nisn": "0012345678",
-  "namaSiswa": "Nama Lengkap Siswa",
+  "nis": "2401",
+  "namaSiswa": "Ahmad Fadhil Pratama",
+  "gender": "L",
   "kelas": "${activeClassLevel}",
   "semester": ${schoolProfile.semester || 1},
   "tahunAjaran": "${schoolProfile.academicYear || '2024/2025'}",
+  "parentName": "Bambang Pratama",
+  "parentPhone": "081234567890",
+  "address": "Jl. Pendidikan No. 12",
+  "birthDate": "2015-05-12",
+  "birthPlace": "Kota Pelajar",
+  "nik": "3201234567890001",
+  "agama": "Islam",
   "sakit": 2,
   "izin": 1,
   "tanpaKeterangan": 0,
@@ -99,7 +111,7 @@ Pada aplikasi SDK Ogomojolo ini, buatkan tombol "Kirim Rekap ke e-Rapor" yang me
       setRecords(data);
       if (data.length > 0) {
         setStatusMessage({
-          text: `Berhasil memuat ${data.length} catatan kehadiran dari Firestore Cloud (${OGOMOJOLO_COLLECTION_NAME}).`,
+          text: `Berhasil memuat ${data.length} catatan siswa & absensi dari Firestore Cloud (${OGOMOJOLO_COLLECTION_NAME}).`,
           type: 'success',
         });
       } else {
@@ -125,6 +137,51 @@ Pada aplikasi SDK Ogomojolo ini, buatkan tombol "Kirim Rekap ke e-Rapor" yang me
     }
   }, [isOpen]);
 
+  // Primary Action: Synchronize ALL student profile data AND attendance data to e-Rapor
+  const handleSyncAllStudentsAndAttendance = () => {
+    if (records.length === 0) {
+      setStatusMessage({ text: 'Tidak ada data siswa atau kehadiran yang dapat disinkronkan.', type: 'error' });
+      return;
+    }
+
+    const {
+      updatedStudents,
+      updatedRaporDetails,
+      newStudents,
+      updatedExistingCount,
+      newStudentsCount,
+      totalCount,
+      syncedStudentNames,
+    } = syncAllOgomojoloData(records, students, raporDetails, activeClassLevel);
+
+    if (totalCount === 0) {
+      setStatusMessage({
+        text: `Tidak ditemukan data siswa untuk ${activeClassLevel} di koleksi Ogomojolo.`,
+        type: 'error',
+      });
+      return;
+    }
+
+    if (onSyncAllFromOgomojolo) {
+      onSyncAllFromOgomojolo(updatedStudents, updatedRaporDetails, newStudents);
+    } else {
+      if (onRegisterStudentsFromOgomojolo) {
+        onRegisterStudentsFromOgomojolo(updatedStudents, updatedRaporDetails);
+      }
+      if (onApplyRaporDetails) {
+        onApplyRaporDetails(updatedRaporDetails, totalCount);
+      }
+    }
+
+    const namesSample = syncedStudentNames.slice(0, 3).join(', ') + (syncedStudentNames.length > 3 ? ` dan ${syncedStudentNames.length - 3} lainnya` : '');
+
+    setStatusMessage({
+      text: `Alhamdulillah! Berhasil menyalin ${totalCount} data siswa lengkap (${newStudentsCount} siswa baru ditambahkan ke Data Siswa, ${updatedExistingCount} profil siswa & kehadiran diselaraskan) untuk: ${namesSample}.`,
+      type: 'success',
+    });
+  };
+
+  // Secondary Action: Only apply attendance to already matched students
   const handleApplyToRapor = () => {
     if (records.length === 0) {
       setStatusMessage({ text: 'Tidak ada data kehadiran yang dapat disinkronkan.', type: 'error' });
@@ -140,7 +197,7 @@ Pada aplikasi SDK Ogomojolo ini, buatkan tombol "Kirim Rekap ke e-Rapor" yang me
 
     if (matchedCount === 0) {
       setStatusMessage({
-        text: `Tidak ada siswa yang cocok dengan NISN/Nama di ${activeClassLevel}. Jika daftar siswa e-Rapor masih kosong, silakan klik tombol "Daftarkan Siswa Baru dari Ogomojolo".`,
+        text: `Tidak ada siswa yang cocok dengan NISN/Nama di ${activeClassLevel}. Klik tombol "Salin Semua Data Siswa & Absensi" untuk menyalin siswa baru secara otomatis.`,
         type: 'error',
       });
       return;
@@ -154,54 +211,100 @@ Pada aplikasi SDK Ogomojolo ini, buatkan tombol "Kirim Rekap ke e-Rapor" yang me
   };
 
   const handleRegisterAllFromOgomojolo = () => {
-    if (records.length === 0) {
-      setStatusMessage({ text: 'Tidak ada data kehadiran yang terbaca dari SDK Ogomojolo.', type: 'error' });
-      return;
-    }
-
-    const { students: newStudents, raporDetails: newDetails } = convertOgomojoloToStudents(
-      records,
-      activeClassLevel
-    );
-
-    if (newStudents.length === 0) {
-      setStatusMessage({
-        text: `Tidak ada data siswa untuk ${activeClassLevel} di koleksi Ogomojolo.`,
-        type: 'error',
-      });
-      return;
-    }
-
-    if (onRegisterStudentsFromOgomojolo) {
-      onRegisterStudentsFromOgomojolo(newStudents, newDetails);
-      setStatusMessage({
-        text: `Alhamdulillah! Berhasil mendaftarkan ${newStudents.length} siswa ke e-Rapor dan menerapkan data kehadiran dari SDK Ogomojolo secara instan!`,
-        type: 'success',
-      });
-    }
+    handleSyncAllStudentsAndAttendance();
   };
 
   const handleSimulateData = async () => {
     setIsSimulating(true);
-    setStatusMessage({ text: 'Mengunggah data simulasi kehadiran SDK Ogomojolo ke Firestore...', type: 'info' });
+    setStatusMessage({ text: 'Mengunggah data simulasi profil siswa & kehadiran SDK Ogomojolo ke Firestore...', type: 'info' });
 
     try {
-      const sampleNames = [
-        'Ahmad Fadhil Pratama',
-        'Bunga Anindya Putri',
-        'Chairul Rahmat Hidayat',
-        'Dina Salsabila',
-        'Erlangga Kurniawan',
+      const sampleProfiles = [
+        {
+          name: 'Ahmad Fadhil Pratama',
+          nisn: '0078912301',
+          nis: '2401',
+          gender: 'L' as const,
+          parentName: 'Bambang Pratama',
+          parentPhone: '081234567801',
+          address: 'Jl. Merdeka No. 10, RT 01/RW 02',
+          birthDate: '2015-02-14',
+          birthPlace: 'Jakarta',
+          nik: '3201011402150001',
+          agama: 'Islam',
+        },
+        {
+          name: 'Bunga Anindya Putri',
+          nisn: '0078912302',
+          nis: '2402',
+          gender: 'P' as const,
+          parentName: 'Hendra Gunawan',
+          parentPhone: '081234567802',
+          address: 'Jl. Melati No. 4, RT 02/RW 03',
+          birthDate: '2015-05-20',
+          birthPlace: 'Bandung',
+          nik: '3201012005150002',
+          agama: 'Islam',
+        },
+        {
+          name: 'Chairul Rahmat Hidayat',
+          nisn: '0078912303',
+          nis: '2403',
+          gender: 'L' as const,
+          parentName: 'Rahmat Santoso',
+          parentPhone: '081234567803',
+          address: 'Jl. Mawar No. 18, RT 03/RW 01',
+          birthDate: '2015-08-09',
+          birthPlace: 'Surabaya',
+          nik: '3201010908150003',
+          agama: 'Islam',
+        },
+        {
+          name: 'Dina Salsabila',
+          nisn: '0078912304',
+          nis: '2404',
+          gender: 'P' as const,
+          parentName: 'Agus Salim',
+          parentPhone: '081234567804',
+          address: 'Jl. Cempaka No. 7, RT 01/RW 04',
+          birthDate: '2015-11-12',
+          birthPlace: 'Semarang',
+          nik: '3201011211150004',
+          agama: 'Islam',
+        },
+        {
+          name: 'Erlangga Kurniawan',
+          nisn: '0078912305',
+          nis: '2405',
+          gender: 'L' as const,
+          parentName: 'Kurniawan Dwi',
+          parentPhone: '081234567805',
+          address: 'Jl. Kenanga No. 25, RT 04/RW 02',
+          birthDate: '2015-03-30',
+          birthPlace: 'Yogyakarta',
+          nik: '3201013003150005',
+          agama: 'Islam',
+        },
       ];
 
+      // Use class students if available to enrich, or use realistic sample profiles
       const sourceList = classStudents.length > 0
-        ? classStudents.map((s) => ({ nisn: s.nisn, name: s.name }))
-        : sampleNames.map((name, i) => ({
-            nisn: `00${7891230 + i}`,
-            name,
-          }));
+        ? classStudents.map((s, idx) => ({
+            name: s.name,
+            nisn: s.nisn || `007891230${idx + 1}`,
+            nis: s.nis || `240${idx + 1}`,
+            gender: s.gender || (idx % 2 === 0 ? ('L' as const) : ('P' as const)),
+            parentName: s.parentName || 'Orang Tua Murid',
+            parentPhone: s.parentPhone || '081234567890',
+            address: s.address || 'Alamat Siswa',
+            birthDate: s.birthDate || '2015-05-10',
+            birthPlace: s.birthPlace || 'Kota Sekolah',
+            nik: s.nik || '',
+            agama: s.religion || 'Islam',
+          }))
+        : sampleProfiles;
 
-      // Create sensible mock attendance
+      // Create complete mock records
       const mockRecords: OgomojoloAttendanceRecord[] = sourceList.map((std, idx) => {
         const sakitDays = idx % 4 === 0 ? 2 : idx % 3 === 0 ? 1 : 0;
         const izinDays = idx % 2 === 0 ? 1 : 0;
@@ -210,15 +313,25 @@ Pada aplikasi SDK Ogomojolo ini, buatkan tombol "Kirim Rekap ke e-Rapor" yang me
         return {
           id: std.nisn,
           nisn: std.nisn,
+          nis: std.nis,
           namaSiswa: std.name,
+          gender: std.gender,
+          jenisKelamin: std.gender,
           kelas: activeClassLevel,
           semester: Number(schoolProfile.semester) || 1,
           tahunAjaran: schoolProfile.academicYear || '2024/2025',
+          parentName: std.parentName,
+          parentPhone: std.parentPhone,
+          address: std.address,
+          birthDate: std.birthDate,
+          birthPlace: std.birthPlace,
+          nik: std.nik,
+          religion: std.agama as any,
           sakit: sakitDays,
           izin: izinDays,
           tanpaKeterangan: alpaDays,
           updatedAt: new Date().toISOString(),
-          catatan: 'Disinkronkan otomatis dari rekap absensi harian SDK Ogomojolo',
+          catatan: 'Disinkronkan otomatis dari rekap data siswa & absensi harian SDK Ogomojolo',
         };
       });
 
@@ -226,7 +339,7 @@ Pada aplikasi SDK Ogomojolo ini, buatkan tombol "Kirim Rekap ke e-Rapor" yang me
       await loadData();
 
       setStatusMessage({
-        text: `Sukses! ${mockRecords.length} data absensi siswa ${activeClassLevel} berhasil diunggah ke koleksi '${OGOMOJOLO_COLLECTION_NAME}'. Sekarang Anda dapat klik 'Daftarkan Siswa' atau 'Terapkan ke Rapor'.`,
+        text: `Sukses! ${mockRecords.length} data profil lengkap siswa & absensi ${activeClassLevel} berhasil diunggah ke koleksi '${OGOMOJOLO_COLLECTION_NAME}'. Klik tombol "Salin Semua Data Siswa & Absensi" di bawah untuk memasukkan ke e-Rapor!`,
         type: 'success',
       });
     } catch (err: any) {
@@ -273,15 +386,15 @@ Pada aplikasi SDK Ogomojolo ini, buatkan tombol "Kirim Rekap ke e-Rapor" yang me
             <div>
               <div className="flex items-center gap-2">
                 <h3 className="text-lg font-black text-slate-900 dark:text-white">
-                  Integrasi Absensi: SDK Ogomojolo
+                  Integrasi SDK Ogomojolo: Data Siswa & Absensi
                 </h3>
                 <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black bg-emerald-100 dark:bg-emerald-950/80 text-emerald-700 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800 flex items-center gap-1">
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                  Opsi B: Shared Cloud Database
+                  Shared Firestore
                 </span>
               </div>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                Sinkronkan rekapitulasi kehadiran (Sakit, Izin, Alpa) ke lembar cetak e-Rapor {activeClassLevel}.
+                Menyalin seluruh data siswa (Nama, NISN, NIS, Gender, Ortu, Kontak, Alamat) dan kehadiran (Sakit, Izin, Alpa) ke e-Rapor {activeClassLevel}.
               </p>
             </div>
           </div>
@@ -325,16 +438,16 @@ Pada aplikasi SDK Ogomojolo ini, buatkan tombol "Kirim Rekap ke e-Rapor" yang me
               <span className="font-mono font-bold text-indigo-600 dark:text-indigo-400">{OGOMOJOLO_COLLECTION_NAME}</span>
             </div>
             <div>
-              <span className="text-[10px] uppercase font-bold text-slate-400 block">Database ID:</span>
-              <span className="font-mono text-slate-700 dark:text-slate-300 truncate block" title="ai-studio-iihhberes-db02674d-a027-43d4-b17e-50573c47075a">
-                ai-studio-iihhberes...
+              <span className="text-[10px] uppercase font-bold text-slate-400 block">Cakupan Data Disalin:</span>
+              <span className="font-bold text-slate-700 dark:text-slate-300">
+                Profil Lengkap Siswa + Presensi
               </span>
             </div>
             <div>
-              <span className="text-[10px] uppercase font-bold text-slate-400 block">Kunci Pencocokan:</span>
+              <span className="text-[10px] uppercase font-bold text-slate-400 block">Kunci Penyelarasan:</span>
               <span className="font-bold text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
                 <ShieldCheck className="w-3.5 h-3.5" />
-                Nomor NISN Siswa
+                NISN / NIS / Nama Siswa
               </span>
             </div>
           </div>
@@ -345,7 +458,7 @@ Pada aplikasi SDK Ogomojolo ini, buatkan tombol "Kirim Rekap ke e-Rapor" yang me
               <div className="flex items-center gap-2">
                 <Sparkles className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
                 <h4 className="font-bold text-slate-900 dark:text-white text-xs">
-                  Perintah Siap Pakai untuk AI di Aplikasi SDK Ogomojolo:
+                  Perintah AI Siap Pakai untuk SDK Ogomojolo (Kirim Profil Lengkap Siswa & Absensi):
                 </h4>
               </div>
               <button
@@ -358,7 +471,7 @@ Pada aplikasi SDK Ogomojolo ini, buatkan tombol "Kirim Rekap ke e-Rapor" yang me
               </button>
             </div>
             <p className="text-[11px] text-slate-600 dark:text-slate-400 leading-relaxed">
-              Buka aplikasi <strong>SDK Ogomojolo</strong> Anda di AI Studio, lalu salin dan kirimkan teks prompt di bawah ini ke AI di sana. AI di SDK Ogomojolo akan otomatis menambahkan tombol kirim rekap absensi ke database ini.
+              Buka aplikasi <strong>SDK Ogomojolo</strong> Anda di AI Studio, lalu salin dan kirimkan teks prompt di bawah ini ke AI di sana. AI di SDK Ogomojolo akan otomatis mengirimkan profil siswa lengkap (Nama, NISN, NIS, Gender, Ortu, Alamat) dan rekap absensi ke database ini.
             </p>
             <div className="bg-white dark:bg-slate-950 p-3 rounded-xl border border-sky-200 dark:border-slate-800 text-[11px] font-mono text-slate-700 dark:text-slate-300 max-h-28 overflow-y-auto whitespace-pre-wrap">
               {promptText}
@@ -377,18 +490,18 @@ Pada aplikasi SDK Ogomojolo ini, buatkan tombol "Kirim Rekap ke e-Rapor" yang me
                     Daftar Siswa {activeClassLevel} Masih Bersih (0 Siswa)
                   </div>
                   <div className="text-emerald-800 dark:text-emerald-300 text-[11px]">
-                    Data dummy telah dibersihkan. Anda dapat langsung mendaftarkan siswa dari rekap absensi SDK Ogomojolo ke e-Rapor ini.
+                    Sistem siap menerima seluruh data siswa lengkap dan kehadiran dari SDK Ogomojolo.
                   </div>
                 </div>
               </div>
-              {records.length > 0 && onRegisterStudentsFromOgomojolo && (
+              {records.length > 0 && (
                 <button
                   type="button"
-                  onClick={handleRegisterAllFromOgomojolo}
+                  onClick={handleSyncAllStudentsAndAttendance}
                   className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-black text-xs shadow-md flex items-center justify-center gap-2 shrink-0 transition hover:scale-[1.02] cursor-pointer"
                 >
                   <UserPlus className="w-4 h-4" />
-                  <span>Daftarkan Siswa & Absensi dari Ogomojolo</span>
+                  <span>Salin Semua Data Siswa dari Ogomojolo</span>
                 </button>
               )}
             </div>
@@ -399,7 +512,7 @@ Pada aplikasi SDK Ogomojolo ini, buatkan tombol "Kirim Rekap ke e-Rapor" yang me
             <div className="p-3 bg-amber-50/70 dark:bg-amber-950/30 rounded-2xl border border-amber-200 dark:border-amber-800/80 text-xs flex flex-wrap items-center justify-between gap-2">
               <div className="flex items-center gap-2 text-amber-900 dark:text-amber-200 text-[11px]">
                 <Trash2 className="w-4 h-4 text-amber-600 shrink-0" />
-                <span>Masih ada {students.length} data siswa tersimpan di browser. Ingin mengosongkan sepenuhnya sebelum transfer?</span>
+                <span>Masih ada {students.length} data siswa tersimpan. Ingin mengosongkan sebelum menyalin data baru?</span>
               </div>
               {showClearConfirm ? (
                 <div className="flex items-center gap-1.5">
@@ -445,44 +558,47 @@ Pada aplikasi SDK Ogomojolo ini, buatkan tombol "Kirim Rekap ke e-Rapor" yang me
                 type="button"
                 onClick={loadData}
                 disabled={isLoading}
-                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-bold text-xs transition cursor-pointer"
+                className="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-bold text-xs transition cursor-pointer"
               >
                 <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin text-indigo-600' : ''}`} />
-                <span>Muat Ulang dari Cloud</span>
+                <span>Muat Ulang</span>
               </button>
 
               <button
                 type="button"
                 onClick={handleSimulateData}
                 disabled={isSimulating}
-                title="Unggah contoh data kehadiran murid Kelas ini untuk mencoba integrasi langsung"
-                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-amber-50 dark:bg-amber-950/60 hover:bg-amber-100 dark:hover:bg-amber-900/80 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800 font-bold text-xs transition cursor-pointer"
+                title="Unggah contoh data profil siswa & kehadiran untuk mencoba integrasi langsung"
+                className="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl bg-amber-50 dark:bg-amber-950/60 hover:bg-amber-100 dark:hover:bg-amber-900/80 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800 font-bold text-xs transition cursor-pointer"
               >
                 <UploadCloud className="w-3.5 h-3.5 text-amber-600" />
-                <span>{isSimulating ? 'Mengunggah...' : 'Kirim Data Uji Coba (Simulasi)'}</span>
+                <span>{isSimulating ? 'Mengunggah...' : 'Kirim Contoh Profil & Absensi (Simulasi)'}</span>
               </button>
             </div>
 
             <div className="flex items-center gap-2">
-              {onRegisterStudentsFromOgomojolo && records.length > 0 && (
+              {/* Secondary option: only update attendance */}
+              {matchingStats.matched > 0 && (
                 <button
                   type="button"
-                  onClick={handleRegisterAllFromOgomojolo}
-                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs shadow-xs transition hover:scale-[1.02] cursor-pointer"
+                  onClick={handleApplyToRapor}
+                  disabled={records.length === 0}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-bold text-xs transition cursor-pointer"
                 >
-                  <UserPlus className="w-3.5 h-3.5" />
-                  <span>Daftarkan Siswa dari Ogomojolo</span>
+                  <CalendarCheck className="w-3.5 h-3.5 text-slate-500" />
+                  <span>Hanya Absensi ({matchingStats.matched})</span>
                 </button>
               )}
 
+              {/* PRIMARY PROMINENT ACTION: Salin Semua Data Siswa & Absensi */}
               <button
                 type="button"
-                onClick={handleApplyToRapor}
+                onClick={handleSyncAllStudentsAndAttendance}
                 disabled={records.length === 0}
-                className="inline-flex items-center gap-2 px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-black text-xs shadow-md shadow-emerald-600/20 transition hover:scale-[1.02] cursor-pointer"
+                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-2xl bg-gradient-to-r from-emerald-600 via-teal-600 to-indigo-600 hover:from-emerald-700 hover:to-indigo-700 disabled:opacity-50 text-white font-black text-xs sm:text-sm shadow-lg shadow-emerald-600/25 transition-all hover:scale-[1.02] cursor-pointer"
               >
-                <CheckCircle2 className="w-4 h-4" />
-                <span>Terapkan ke Rapor {activeClassLevel} ({matchingStats.matched} Siswa Cocok)</span>
+                <Users className="w-4 h-4" />
+                <span>Salin Semua Data Siswa & Absensi ke e-Rapor ({records.length} Siswa)</span>
               </button>
             </div>
           </div>
@@ -490,46 +606,53 @@ Pada aplikasi SDK Ogomojolo ini, buatkan tombol "Kirim Rekap ke e-Rapor" yang me
           {/* Preview Table of Ogomojolo Attendance in Cloud */}
           <div className="space-y-2 pt-2">
             <div className="flex items-center justify-between text-xs">
-              <span className="font-bold text-slate-800 dark:text-slate-200">
-                Data Kehadiran Terbaca di Koleksi '{OGOMOJOLO_COLLECTION_NAME}' ({records.length} data):
+              <span className="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                <Users className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+                <span>Data Siswa & Absensi Terbaca di Koleksi '{OGOMOJOLO_COLLECTION_NAME}' ({records.length} data):</span>
               </span>
               <span className="text-slate-500 dark:text-slate-400">
-                Cocok dengan {activeClassLevel}: <strong>{matchingStats.matched}</strong> dari {classStudents.length} siswa
+                Siswa terdaftar di {activeClassLevel}: <strong>{classStudents.length}</strong> siswa
               </span>
             </div>
 
             <div className="border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden">
-              <div className="max-h-60 overflow-y-auto">
+              <div className="max-h-72 overflow-y-auto">
                 <table className="w-full text-left text-xs border-collapse">
                   <thead className="bg-slate-100 dark:bg-slate-800/80 text-slate-700 dark:text-slate-300 font-bold sticky top-0 border-b border-slate-200 dark:border-slate-700">
                     <tr>
-                      <th className="p-2.5 pl-4">NISN</th>
-                      <th className="p-2.5">Nama Siswa</th>
+                      <th className="p-2.5 pl-4">NISN / NIS</th>
+                      <th className="p-2.5">Nama Siswa & JK</th>
                       <th className="p-2.5">Kelas</th>
+                      <th className="p-2.5">Kontak & Alamat</th>
                       <th className="p-2.5 text-center">Sakit</th>
                       <th className="p-2.5 text-center">Izin</th>
                       <th className="p-2.5 text-center">Alpa</th>
-                      <th className="p-2.5 pr-4 text-right">Status Kecocokan</th>
+                      <th className="p-2.5 pr-4 text-right">Status di e-Rapor</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                     {records.length === 0 ? (
                       <tr>
-                        <td colSpan={7} className="p-8 text-center text-slate-400">
+                        <td colSpan={8} className="p-8 text-center text-slate-400">
                           <Layers className="w-8 h-8 mx-auto text-slate-300 dark:text-slate-600 mb-2" />
                           <p className="font-bold text-slate-600 dark:text-slate-400">Koleksi masih kosong</p>
                           <p className="text-[11px] text-slate-400 mt-1">
-                            Gunakan tombol <strong>"Kirim Data Uji Coba (Simulasi)"</strong> di atas untuk mencoba, atau minta AI di SDK Ogomojolo mengirimkan data absensi.
+                            Gunakan tombol <strong>"Kirim Contoh Profil & Absensi (Simulasi)"</strong> di atas untuk mencoba, atau minta AI di SDK Ogomojolo mengirimkan seluruh data siswa.
                           </p>
                         </td>
                       </tr>
                     ) : (
                       records.map((r, i) => {
-                        const isMatch = classStudents.some(
+                        const existingStudent = classStudents.find(
                           (s) =>
                             (s.nisn && s.nisn.trim() === r.nisn.trim()) ||
+                            (s.nis && r.nis && s.nis.trim() === r.nis.trim()) ||
                             s.name.trim().toLowerCase() === r.namaSiswa.trim().toLowerCase()
                         );
+                        const isMatch = Boolean(existingStudent);
+                        const genderLabel = r.gender === 'P' || r.jenisKelamin === 'P' ? 'Perempuan' : 'Laki-laki';
+                        const genderShort = r.gender === 'P' || r.jenisKelamin === 'P' ? 'P' : 'L';
+
                         return (
                           <tr
                             key={r.id || i}
@@ -538,12 +661,26 @@ Pada aplikasi SDK Ogomojolo ini, buatkan tombol "Kirim Rekap ke e-Rapor" yang me
                             }`}
                           >
                             <td className="p-2.5 pl-4 font-mono font-semibold text-slate-900 dark:text-slate-100">
-                              {r.nisn || '-'}
+                              <div>{r.nisn || '-'}</div>
+                              {r.nis && <div className="text-[10px] text-slate-400 font-sans">NIS: {r.nis}</div>}
                             </td>
                             <td className="p-2.5 font-bold text-slate-800 dark:text-slate-200">
-                              {r.namaSiswa}
+                              <div className="flex items-center gap-1.5">
+                                <span>{r.namaSiswa}</span>
+                                <span className={`px-1.5 py-0.2 rounded text-[10px] font-black ${
+                                  genderShort === 'L' ? 'bg-sky-100 dark:bg-sky-900/60 text-sky-700 dark:text-sky-300' : 'bg-rose-100 dark:bg-rose-900/60 text-rose-700 dark:text-rose-300'
+                                }`}>
+                                  {genderShort}
+                                </span>
+                              </div>
                             </td>
-                            <td className="p-2.5 text-slate-600 dark:text-slate-400">{r.kelas || '-'}</td>
+                            <td className="p-2.5 text-slate-600 dark:text-slate-400 whitespace-nowrap">
+                              {r.kelas || activeClassLevel}
+                            </td>
+                            <td className="p-2.5 text-slate-600 dark:text-slate-400 max-w-[160px] truncate text-[11px]">
+                              <div>{r.parentName || r.namaOrtu || '-'}</div>
+                              <div className="text-slate-400 truncate">{r.address || r.alamat || '-'}</div>
+                            </td>
                             <td className="p-2.5 text-center font-bold text-amber-600 dark:text-amber-400">
                               {r.sakit} hr
                             </td>
@@ -553,14 +690,16 @@ Pada aplikasi SDK Ogomojolo ini, buatkan tombol "Kirim Rekap ke e-Rapor" yang me
                             <td className="p-2.5 text-center font-bold text-rose-600 dark:text-rose-400">
                               {r.tanpaKeterangan} hr
                             </td>
-                            <td className="p-2.5 pr-4 text-right">
+                            <td className="p-2.5 pr-4 text-right whitespace-nowrap">
                               {isMatch ? (
-                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 dark:bg-emerald-900/60 text-emerald-700 dark:text-emerald-300">
-                                  <Check className="w-3 h-3" /> Cocok {activeClassLevel}
+                                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-black bg-emerald-100 dark:bg-emerald-900/60 text-emerald-800 dark:text-emerald-200 border border-emerald-300 dark:border-emerald-800">
+                                  <Check className="w-3 h-3 text-emerald-600" />
+                                  Profil & Absensi Diperbarui
                                 </span>
                               ) : (
-                                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 dark:bg-slate-800 text-slate-500">
-                                  Kelas Lain
+                                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-black bg-indigo-100 dark:bg-indigo-900/60 text-indigo-800 dark:text-indigo-200 border border-indigo-300 dark:border-indigo-800">
+                                  <UserPlus className="w-3 h-3 text-indigo-600" />
+                                  Siswa Baru (Akan Disalin)
                                 </span>
                               )}
                             </td>
@@ -578,7 +717,7 @@ Pada aplikasi SDK Ogomojolo ini, buatkan tombol "Kirim Rekap ke e-Rapor" yang me
         {/* Footer */}
         <div className="flex items-center justify-between border-t border-gray-100 dark:border-slate-800 pt-3 shrink-0">
           <span className="text-[11px] text-slate-400">
-            Database Cloud: Google Firebase Firestore • Real-time Sync Ready
+            Database Cloud: Google Firebase Firestore • Penyalinan Lengkap Profil & Absensi Siap Pakai
           </span>
           <button
             type="button"

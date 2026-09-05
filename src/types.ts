@@ -344,5 +344,31 @@ export interface OgomojoloAttendanceRecord {
   tanpaKeterangan: number;
   updatedAt?: string;
   catatan?: string;
+
+  // Data Profil Siswa Lengkap yang Disalin dari SDK Ogomojolo
+  nis?: string;
+  gender?: 'L' | 'P';
+  jenisKelamin?: 'L' | 'P' | string;
+  jk?: 'L' | 'P' | string;
+  parentName?: string;
+  namaOrtu?: string;
+  namaAyah?: string;
+  namaIbu?: string;
+  parentPhone?: string;
+  noHp?: string;
+  telepon?: string;
+  address?: string;
+  alamat?: string;
+  birthDate?: string;
+  tanggalLahir?: string;
+  birthPlace?: string;
+  tempatLahir?: string;
+  nik?: string;
+  religion?: 'Islam' | 'Kristen' | 'Katolik' | 'Hindu' | 'Buddha' | 'Konghucu' | string;
+  agama?: string;
+  avatar?: string;
+  fatherJob?: string;
+  motherJob?: string;
+  guardianName?: string;
 }
 
