@@ -24,6 +24,7 @@ import {
   Layers,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
   Search,
   GraduationCap,
   Edit3,
@@ -133,6 +134,8 @@ export const CetakRaporView: React.FC<CetakRaporViewProps> = ({
   const [isOgomojoloModalOpen, setIsOgomojoloModalOpen] = useState<boolean>(false);
   const [isEditingPresensi, setIsEditingPresensi] = useState<boolean>(false);
   const [printSuccessToast, setPrintSuccessToast] = useState<string | null>(null);
+  const [studentSearchQuery, setStudentSearchQuery] = useState<string>('');
+  const [isExcelDropdownOpen, setIsExcelDropdownOpen] = useState<boolean>(false);
 
   // Pre-generate QR Code e-Sign
   const [teacherQrCode, setTeacherQrCode] = useState<string>('');
@@ -141,6 +144,32 @@ export const CetakRaporView: React.FC<CetakRaporViewProps> = ({
   const currentSignatureMode: SignatureMode = schoolProfile.signatureSettings?.mode || 'qr_code';
 
   const currentStudent = classStudents.find((s) => s.id === selectedStudentId) || classStudents[0] || students[0];
+
+  const currentStudentIndex = classStudents.findIndex(
+    (s) => s.id === (currentStudent?.id || selectedStudentId)
+  );
+
+  const handlePrevStudent = () => {
+    if (currentStudentIndex > 0) {
+      setSelectedStudentId(classStudents[currentStudentIndex - 1].id);
+    }
+  };
+
+  const handleNextStudent = () => {
+    if (currentStudentIndex >= 0 && currentStudentIndex < classStudents.length - 1) {
+      setSelectedStudentId(classStudents[currentStudentIndex + 1].id);
+    }
+  };
+
+  const filteredStudents = classStudents.filter((std) => {
+    if (!studentSearchQuery.trim()) return true;
+    const q = studentSearchQuery.toLowerCase();
+    return (
+      std.name.toLowerCase().includes(q) ||
+      (std.nisn && std.nisn.toLowerCase().includes(q)) ||
+      (std.nis && std.nis.toLowerCase().includes(q))
+    );
+  });
 
   useEffect(() => {
     let isMounted = true;
@@ -1105,90 +1134,119 @@ export const CetakRaporView: React.FC<CetakRaporViewProps> = ({
       )}
 
       {/* Control Bar (hidden during print) */}
-      <div className="bg-white dark:bg-slate-900 rounded-[32px] border-2 border-indigo-100 dark:border-slate-800 shadow-xs p-6 space-y-5 print:hidden transition-colors">
-        {/* Header & Class Switcher */}
-        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+      <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm p-5 space-y-4 print:hidden transition-colors">
+        {/* Header & Quick Action Toolbar */}
+        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 pb-3 border-b border-slate-100 dark:border-slate-800">
           <div>
-            <div className="flex flex-wrap items-center gap-2.5">
-              <h2 className="text-xl sm:text-2xl font-black text-gray-900 dark:text-white">
+            <div className="flex flex-wrap items-center gap-2">
+              <h2 className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white">
                 Cetak Lembar Hasil Belajar (e-Rapor)
               </h2>
-              <span className="px-3 py-1 rounded-full text-xs font-black bg-[#4F46E5] text-white shadow-xs">
+              <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-indigo-600 text-white shadow-xs">
                 {activeClassLevel} • {currentFase}
               </span>
             </div>
-            <p className="text-xs text-gray-500 dark:text-slate-400 font-medium mt-1">
-              Format lengkap: Cover Depan, Lembar Identitas Siswa, Capaian Nilai, Rapor Projek P5, dan Petunjuk.
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+              {schoolProfile.schoolName} • Tahun Ajaran {schoolProfile.academicYear} • Kurikulum Merdeka
             </p>
           </div>
 
-          {/* Action Buttons Toolbar */}
-          <div className="flex flex-wrap items-center gap-2.5">
-            <button
-              type="button"
-              onClick={() => downloadExcelTemplate((activeClassLevel || 'Kelas 4') as ClassLevel)}
-              title="Unduh Format Template Excel (.xlsx)"
-              className="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-2xl bg-emerald-50 dark:bg-emerald-950/60 hover:bg-emerald-100 dark:hover:bg-emerald-900/80 text-emerald-700 dark:text-emerald-300 font-bold text-xs border border-emerald-200 dark:border-emerald-800 transition-all shadow-xs cursor-pointer"
-            >
-              <FileSpreadsheet className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
-              <span>Format Excel</span>
-            </button>
+          {/* Clean Action Toolbar */}
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Secondary Actions */}
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <button
+                type="button"
+                onClick={handlePrintInNewTab}
+                title="Buka Lembar Cetak di Tab Baru (Bebas Hambatan Iframe)"
+                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-semibold text-xs border border-slate-200 dark:border-slate-700 transition cursor-pointer"
+              >
+                <ExternalLink className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+                <span>Buka Tab Baru</span>
+              </button>
 
-            <button
-              type="button"
-              onClick={() =>
-                exportClassDataToExcel(
-                  students,
-                  subjects,
-                  grades,
-                  raporDetails,
-                  (activeClassLevel || 'Kelas 4') as ClassLevel,
-                  schoolProfile
-                )
-              }
-              title="Ekspor Seluruh Nilai Kelas ke Excel"
-              className="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-2xl bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs shadow-md shadow-teal-600/20 transition-all hover:scale-[1.02] cursor-pointer"
-            >
-              <Download className="w-4 h-4 text-teal-100" />
-              <span>Ekspor Excel</span>
-            </button>
+              <button
+                type="button"
+                onClick={handleDownloadReportFile}
+                title="Unduh Berkas Rapor Mandiri (.HTML Siap Cetak)"
+                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-semibold text-xs border border-slate-200 dark:border-slate-700 transition cursor-pointer"
+              >
+                <FileDown className="w-3.5 h-3.5 text-violet-600 dark:text-violet-400" />
+                <span>Unduh .HTML</span>
+              </button>
 
-            <button
-              type="button"
-              onClick={() => setIsOgomojoloModalOpen(true)}
-              title="Sinkronkan Data Ketidakhadiran (Sakit, Izin, Alpa) dari SDK Ogomojolo melalui Firebase Firestore"
-              className="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-2xl bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs shadow-md shadow-amber-500/20 transition-all hover:scale-[1.02] cursor-pointer"
-            >
-              <CalendarCheck className="w-4 h-4 text-amber-100" />
-              <span>Sinkron Absensi Ogomojolo</span>
-            </button>
+              <button
+                type="button"
+                onClick={() => setIsOgomojoloModalOpen(true)}
+                title="Sinkronkan Presensi Siswa dari SDK Ogomojolo"
+                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-amber-50 dark:bg-amber-950/40 hover:bg-amber-100 dark:hover:bg-amber-900/40 text-amber-800 dark:text-amber-300 font-semibold text-xs border border-amber-200 dark:border-amber-800/60 transition cursor-pointer"
+              >
+                <CalendarCheck className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+                <span>Sinkron Absensi</span>
+              </button>
 
-            <button
-              type="button"
-              onClick={handlePrintInNewTab}
-              title="Buka Lembar Cetak di Tab Baru (Bebas Hambatan Iframe)"
-              className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-2xl bg-sky-600 hover:bg-sky-700 text-white font-bold text-xs shadow-md shadow-sky-600/20 transition-all hover:scale-[1.02] cursor-pointer"
-            >
-              <ExternalLink className="w-4 h-4 text-sky-100" />
-              <span>Buka Tab Cetak</span>
-            </button>
+              {/* Excel Dropdown Menu */}
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => setIsExcelDropdownOpen(!isExcelDropdownOpen)}
+                  title="Pilihan Format & Ekspor Excel"
+                  className="inline-flex items-center gap-1 px-3 py-2 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 hover:bg-emerald-100 dark:hover:bg-emerald-900/40 text-emerald-800 dark:text-emerald-300 font-semibold text-xs border border-emerald-200 dark:border-emerald-800/60 transition cursor-pointer"
+                >
+                  <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                  <span>Excel</span>
+                  <ChevronDown className={`w-3.5 h-3.5 transition-transform ${isExcelDropdownOpen ? 'rotate-180' : ''}`} />
+                </button>
 
-            <button
-              type="button"
-              onClick={handleDownloadReportFile}
-              title="Unduh Berkas Rapor Mandiri (.HTML Siap Cetak & Simpan PDF)"
-              className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-2xl bg-violet-600 hover:bg-violet-700 text-white font-bold text-xs shadow-md shadow-violet-600/20 transition-all hover:scale-[1.02] cursor-pointer"
-            >
-              <FileDown className="w-4 h-4 text-violet-100" />
-              <span>Unduh .HTML</span>
-            </button>
+                {isExcelDropdownOpen && (
+                  <div className="absolute right-0 mt-1.5 w-56 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl z-30 p-1.5 space-y-1">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsExcelDropdownOpen(false);
+                        exportClassDataToExcel(
+                          students,
+                          subjects,
+                          grades,
+                          raporDetails,
+                          (activeClassLevel || 'Kelas 4') as ClassLevel,
+                          schoolProfile
+                        );
+                      }}
+                      className="w-full text-left flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-emerald-50 dark:hover:bg-emerald-950/50 hover:text-emerald-700 transition cursor-pointer"
+                    >
+                      <Download className="w-4 h-4 text-emerald-600" />
+                      <div>
+                        <div className="font-bold">Ekspor Nilai Kelas</div>
+                        <div className="text-[10px] text-slate-400">Rekap seluruh nilai (.xlsx)</div>
+                      </div>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsExcelDropdownOpen(false);
+                        downloadExcelTemplate((activeClassLevel || 'Kelas 4') as ClassLevel);
+                      }}
+                      className="w-full text-left flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 transition cursor-pointer"
+                    >
+                      <FileSpreadsheet className="w-4 h-4 text-slate-500" />
+                      <div>
+                        <div className="font-bold">Format Template Excel</div>
+                        <div className="text-[10px] text-slate-400">Template impor nilai (.xlsx)</div>
+                      </div>
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
 
+            {/* Primary Action Button */}
             <button
               type="button"
               onClick={() => setIsPrintModalOpen(true)}
               id="btn-trigger-print"
-              title="Buka Pilihan Metode Cetak & Simpan PDF"
-              className="inline-flex items-center gap-2 px-6 py-2.5 rounded-2xl bg-indigo-600 hover:bg-indigo-700 text-white font-black text-xs shadow-lg shadow-indigo-600/25 transition-all hover:scale-[1.02] cursor-pointer"
+              title="Buka Pilihan Cetak & Simpan PDF"
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs shadow-md shadow-indigo-600/20 transition hover:scale-[1.02] cursor-pointer"
             >
               <Printer className="w-4 h-4" />
               <span>Cetak / Simpan PDF</span>
@@ -1196,48 +1254,13 @@ export const CetakRaporView: React.FC<CetakRaporViewProps> = ({
           </div>
         </div>
 
-        {/* Helpful Tip Banner for Iframe / Browser sandbox */}
-        <div className="p-3.5 bg-indigo-50/70 dark:bg-slate-800/60 border border-indigo-100 dark:border-slate-700 rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-slate-800 dark:text-slate-200 text-xs">
-          <div className="flex items-center gap-2.5">
-            <Info className="w-5 h-5 text-indigo-600 dark:text-indigo-400 shrink-0" />
-            <p>
-              <strong>💡 Panduan Cetak:</strong> Gunakan tombol <strong>"Buka Tab Cetak"</strong> atau <strong>"Unduh .HTML"</strong> untuk mencetak secara langsung atau menyimpan seluruh lembar rapor ke file PDF.
-            </p>
-          </div>
-          <div className="flex items-center gap-2 shrink-0">
-            <button
-              type="button"
-              onClick={handlePrintInNewTab}
-              className="px-3 py-1 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-lg transition cursor-pointer"
-            >
-              Buka Tab Baru ↗
-            </button>
-          </div>
-        </div>
-
-        {/* Signature & Pengesahan Mode Switcher Bar */}
-        <div className="p-4 bg-gradient-to-r from-indigo-50/80 to-purple-50/80 dark:from-slate-800/80 dark:to-indigo-950/40 border border-indigo-200 dark:border-slate-700 rounded-2xl flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <div className="p-2.5 bg-indigo-600 text-white rounded-xl shadow-xs">
-              <QrCode className="w-5 h-5" />
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-black text-slate-900 dark:text-white uppercase tracking-wider">
-                  Format Pengesahan & Tanda Tangan:
-                </span>
-                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-100 dark:bg-indigo-900/70 text-indigo-700 dark:text-indigo-300">
-                  {currentSignatureMode === 'manual' ? '✍️ TTD Basah (Manual)' : currentSignatureMode === 'qr_code' ? '📱 Barcode / QR Code e-Sign' : '🖊️ Scan Digital & Stempel'}
-                </span>
-              </div>
-              <p className="text-[11px] text-slate-600 dark:text-slate-400">
-                Pilih format tanda tangan guru dan kepala sekolah pada seluruh lembar rapor.
-              </p>
-            </div>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
-            <div className="inline-flex rounded-xl bg-white dark:bg-slate-900 p-1 border border-indigo-200 dark:border-slate-700 shadow-2xs">
+        {/* Compact Settings & Signature Mode Strip */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-2.5 bg-slate-50 dark:bg-slate-800/60 rounded-2xl border border-slate-200 dark:border-slate-700/80">
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-bold text-slate-700 dark:text-slate-300 shrink-0">
+              Format TTD:
+            </span>
+            <div className="inline-flex rounded-xl bg-white dark:bg-slate-900 p-1 border border-slate-200 dark:border-slate-700 shadow-2xs">
               {[
                 { id: 'manual' as const, label: '✍️ TTD Basah' },
                 { id: 'qr_code' as const, label: '📱 Barcode QR (e-Sign)' },
@@ -1247,9 +1270,9 @@ export const CetakRaporView: React.FC<CetakRaporViewProps> = ({
                   key={m.id}
                   type="button"
                   onClick={() => handleQuickChangeSignatureMode(m.id)}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                  className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition cursor-pointer ${
                     currentSignatureMode === m.id
-                      ? 'bg-indigo-600 text-white shadow-xs'
+                      ? 'bg-indigo-600 text-white shadow-xs font-bold'
                       : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                   }`}
                 >
@@ -1257,98 +1280,194 @@ export const CetakRaporView: React.FC<CetakRaporViewProps> = ({
                 </button>
               ))}
             </div>
+          </div>
 
+          <div className="flex items-center gap-2">
             <button
               type="button"
               onClick={() => setIsSignatureModalOpen(true)}
-              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs shadow-xs transition hover:scale-[1.02] cursor-pointer"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:text-indigo-600 font-bold text-xs shadow-2xs transition cursor-pointer"
             >
-              <Edit3 className="w-3.5 h-3.5" />
+              <Edit3 className="w-3.5 h-3.5 text-indigo-600" />
               <span>Atur Gambar & Stempel</span>
             </button>
           </div>
         </div>
 
-        {/* Document Tabs Bar */}
-        <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 pt-4 border-t border-gray-100 dark:border-slate-800">
-          {/* Document Section Tabs */}
-          <div className="flex items-center gap-1.5 overflow-x-auto p-1 bg-gray-100 dark:bg-slate-800 rounded-2xl w-full">
-            {[
-              { id: 'nilai' as const, label: 'Lembar Nilai Rapor', icon: <FileText className="w-3.5 h-3.5" /> },
-              { id: 'cover' as const, label: 'Sampul / Cover', icon: <GraduationCap className="w-3.5 h-3.5" /> },
-              { id: 'identitas' as const, label: 'Identitas Siswa', icon: <User className="w-3.5 h-3.5" /> },
-              { id: 'p5' as const, label: 'Rapor Projek P5', icon: <Compass className="w-3.5 h-3.5" /> },
-              { id: 'petunjuk' as const, label: 'Petunjuk Penggunaan', icon: <HelpCircle className="w-3.5 h-3.5" /> },
-              { id: 'bundle' as const, label: 'Bundle Lengkap (Semua)', icon: <FileCheck className="w-3.5 h-3.5" /> },
-            ].map((tab) => {
-              const isActive = docTab === tab.id;
-              return (
-                <button
-                  key={tab.id}
-                  type="button"
-                  onClick={() => setDocTab(tab.id)}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap ${
-                    isActive
-                      ? 'bg-indigo-600 text-white shadow-xs'
-                      : 'text-gray-600 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-400'
-                  }`}
-                >
-                  {tab.icon}
-                  <span>{tab.label}</span>
-                </button>
-              );
-            })}
-          </div>
+        {/* Document Section Tabs */}
+        <div className="flex items-center gap-1 overflow-x-auto p-1 bg-slate-100 dark:bg-slate-800/80 rounded-2xl scrollbar-none">
+          {[
+            { id: 'nilai' as const, label: 'Lembar Nilai Rapor', icon: <FileText className="w-3.5 h-3.5" /> },
+            { id: 'cover' as const, label: 'Sampul / Cover', icon: <GraduationCap className="w-3.5 h-3.5" /> },
+            { id: 'identitas' as const, label: 'Identitas Siswa', icon: <User className="w-3.5 h-3.5" /> },
+            { id: 'p5' as const, label: 'Rapor Projek P5', icon: <Compass className="w-3.5 h-3.5" /> },
+            { id: 'petunjuk' as const, label: 'Petunjuk Penggunaan', icon: <HelpCircle className="w-3.5 h-3.5" /> },
+            { id: 'bundle' as const, label: 'Bundle Lengkap (Semua)', icon: <FileCheck className="w-3.5 h-3.5" /> },
+          ].map((tab) => {
+            const isActive = docTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => setDocTab(tab.id)}
+                className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold transition cursor-pointer whitespace-nowrap ${
+                  isActive
+                    ? 'bg-indigo-600 text-white shadow-xs font-bold'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                }`}
+              >
+                {tab.icon}
+                <span>{tab.label}</span>
+              </button>
+            );
+          })}
         </div>
 
-        {/* Student Selector Carousel */}
-        <div className="space-y-2 pt-2">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-gray-700 dark:text-slate-300">
-              Pilih Siswa ({classStudents.length} siswa di {activeClassLevel}):
-            </span>
-            {docTab === 'identitas' && (
-              <button
-                type="button"
-                onClick={() => setIsEditingBiodata(!isEditingBiodata)}
-                className="text-xs text-indigo-600 dark:text-indigo-400 font-bold flex items-center gap-1 hover:underline cursor-pointer"
-              >
-                <Edit3 className="w-3.5 h-3.5" />
-                <span>{isEditingBiodata ? 'Tutup Sunting' : 'Sunting Biodata Lengkap'}</span>
-              </button>
-            )}
+        {/* Click & Scroll Student List Section */}
+        <div className="space-y-2.5 pt-1">
+          {/* List Header Bar */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-2 border-b border-slate-100 dark:border-slate-800">
+            <div className="flex items-center gap-2 flex-wrap">
+              <div className="flex items-center gap-1.5">
+                <Users className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+                <span className="text-xs font-bold text-slate-900 dark:text-white">
+                  Daftar Siswa
+                </span>
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800">
+                  {classStudents.length} siswa
+                </span>
+              </div>
+
+              {currentStudent && (
+                <span className="text-xs text-slate-500 dark:text-slate-400 border-l border-slate-200 dark:border-slate-700 pl-2">
+                  Terpilih: <strong className="text-indigo-600 dark:text-indigo-400 font-bold uppercase">No. {currentStudentIndex + 1} - {currentStudent.name}</strong>
+                  {currentStudent.nisn && <span className="font-mono text-[11px] text-slate-400 ml-1">({currentStudent.nisn})</span>}
+                </span>
+              )}
+            </div>
+
+            {/* Quick Navigation & Search */}
+            <div className="flex items-center gap-2">
+              {/* Prev & Next Student Navigation */}
+              <div className="inline-flex items-center rounded-xl bg-slate-100 dark:bg-slate-800 p-0.5 border border-slate-200 dark:border-slate-700">
+                <button
+                  type="button"
+                  onClick={handlePrevStudent}
+                  disabled={currentStudentIndex <= 0}
+                  title="Pindah ke Siswa Sebelumnya"
+                  className="p-1 rounded-lg text-slate-600 dark:text-slate-300 hover:bg-white dark:hover:bg-slate-700 disabled:opacity-30 disabled:pointer-events-none transition cursor-pointer"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                </button>
+                <span className="px-2 text-[11px] font-mono font-bold text-slate-600 dark:text-slate-300">
+                  {currentStudentIndex >= 0 ? currentStudentIndex + 1 : '-'}/{classStudents.length}
+                </span>
+                <button
+                  type="button"
+                  onClick={handleNextStudent}
+                  disabled={currentStudentIndex >= classStudents.length - 1}
+                  title="Pindah ke Siswa Berikutnya"
+                  className="p-1 rounded-lg text-slate-600 dark:text-slate-300 hover:bg-white dark:hover:bg-slate-700 disabled:opacity-30 disabled:pointer-events-none transition cursor-pointer"
+                >
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Quick Search */}
+              <div className="relative">
+                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <input
+                  type="text"
+                  placeholder="Cari siswa..."
+                  value={studentSearchQuery}
+                  onChange={(e) => setStudentSearchQuery(e.target.value)}
+                  className="pl-8 pr-6 py-1 rounded-xl text-xs bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-indigo-500 w-32 sm:w-44 transition"
+                />
+                {studentSearchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => setStudentSearchQuery('')}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                )}
+              </div>
+
+              {docTab === 'identitas' && (
+                <button
+                  type="button"
+                  onClick={() => setIsEditingBiodata(!isEditingBiodata)}
+                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl bg-indigo-50 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 font-bold text-xs border border-indigo-200 dark:border-indigo-800 transition cursor-pointer"
+                >
+                  <Edit3 className="w-3.5 h-3.5" />
+                  <span>{isEditingBiodata ? 'Tutup Sunting' : 'Sunting Biodata'}</span>
+                </button>
+              )}
+            </div>
           </div>
-          <div className="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-none">
+
+          {/* Scrollable Student List Container */}
+          <div className="max-h-48 overflow-y-auto pr-1.5 space-y-1.5 scrollbar-thin scrollbar-thumb-slate-300 dark:scrollbar-thumb-slate-700">
             {classStudents.length === 0 ? (
-              <div className="text-xs text-slate-400 py-1.5 italic flex items-center gap-2">
-                <span>Belum ada data siswa di {activeClassLevel}.</span>
+              <div className="text-center py-6 bg-slate-50 dark:bg-slate-800/40 rounded-2xl border border-dashed border-slate-200 dark:border-slate-700">
+                <p className="text-xs text-slate-400">Belum ada data siswa di {activeClassLevel}.</p>
                 <button
                   type="button"
                   onClick={() => setIsOgomojoloModalOpen(true)}
-                  className="px-2.5 py-1 bg-indigo-50 dark:bg-indigo-950/80 text-indigo-600 dark:text-indigo-400 rounded-lg font-bold hover:underline"
+                  className="mt-2 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-600 text-white text-xs font-bold shadow-xs hover:bg-indigo-700 cursor-pointer"
                 >
-                  Sinkronkan Siswa dari SDK Ogomojolo
+                  <CalendarCheck className="w-3.5 h-3.5" />
+                  <span>Sinkronkan Siswa dari SDK Ogomojolo</span>
                 </button>
               </div>
+            ) : filteredStudents.length === 0 ? (
+              <div className="text-center py-4 text-xs text-slate-400 italic">
+                Tidak ada siswa yang cocok dengan "{studentSearchQuery}"
+              </div>
             ) : (
-              classStudents.map((std) => {
-                const isSelected = std.id === selectedStudentId;
-                return (
-                  <button
-                    key={std.id}
-                    type="button"
-                    onClick={() => setSelectedStudentId(std.id)}
-                    className={`px-3.5 py-2 rounded-2xl text-xs font-bold whitespace-nowrap transition-all flex items-center gap-2 cursor-pointer ${
-                      isSelected
-                        ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/20 scale-[1.02]'
-                        : 'bg-gray-100 dark:bg-slate-800 text-gray-700 dark:text-slate-300 hover:bg-gray-200 dark:hover:bg-slate-700'
-                    }`}
-                  >
-                    <User className="w-3.5 h-3.5" />
-                    <span>{std.name}</span>
-                  </button>
-                );
-              })
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2">
+                {filteredStudents.map((std) => {
+                  const isSelected = std.id === selectedStudentId;
+                  const originalIndex = classStudents.findIndex((s) => s.id === std.id);
+                  return (
+                    <button
+                      key={std.id}
+                      type="button"
+                      onClick={() => setSelectedStudentId(std.id)}
+                      className={`text-left p-2.5 rounded-xl text-xs transition-all flex items-center justify-between gap-2 border cursor-pointer ${
+                        isSelected
+                          ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm ring-2 ring-indigo-300 dark:ring-indigo-700'
+                          : 'bg-white dark:bg-slate-800/90 text-slate-800 dark:text-slate-200 border-slate-200 dark:border-slate-700/80 hover:bg-indigo-50/70 dark:hover:bg-slate-700/60'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span
+                          className={`w-5 h-5 shrink-0 rounded-full flex items-center justify-center font-mono text-[10px] font-bold ${
+                            isSelected
+                              ? 'bg-white/20 text-white'
+                              : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300'
+                          }`}
+                        >
+                          {originalIndex + 1}
+                        </span>
+                        <div className="min-w-0">
+                          <div className={`font-bold truncate text-[11px] uppercase ${isSelected ? 'text-white' : 'text-slate-900 dark:text-white'}`}>
+                            {std.name}
+                          </div>
+                          <div className={`text-[10px] font-mono truncate ${isSelected ? 'text-indigo-100' : 'text-slate-400'}`}>
+                            {std.nisn ? `NISN ${std.nisn}` : std.gender ? `JK: ${std.gender}` : 'Siswa'}
+                          </div>
+                        </div>
+                      </div>
+
+                      {isSelected && (
+                        <CheckCircle2 className="w-4 h-4 text-white shrink-0" />
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
             )}
           </div>
         </div>
