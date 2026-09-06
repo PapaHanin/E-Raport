@@ -30,6 +30,7 @@ import { GradebookView } from './components/GradebookView';
 import { AINarasiView } from './components/AINarasiView';
 import { P5ProjectView } from './components/P5ProjectView';
 import { CetakRaporView } from './components/CetakRaporView';
+import { TarikDataSiswaView } from './components/TarikDataSiswaView';
 import { WhatsAppGatewayView } from './components/WhatsAppGatewayView';
 import { DapodikSyncView } from './components/DapodikSyncView';
 import { BankTPView } from './components/BankTPView';
@@ -628,6 +629,22 @@ export function App() {
             />
           )}
 
+          {(activeTab === 'tarik-data' || activeTab === 'tarik-data-siswa' || activeTab === 'ogomojolo-sync' || activeTab === 'tarik') && (
+            <TarikDataSiswaView
+              students={students}
+              raporDetails={raporDetails}
+              activeClassLevel={activeClassLevel}
+              schoolProfile={schoolProfile}
+              currentUser={currentUser}
+              onSelectClassLevel={handleSelectClassLevel}
+              onRegisterStudentsFromOgomojolo={handleRegisterStudentsFromOgomojolo}
+              onSyncAllFromOgomojolo={handleSyncAllFromOgomojolo}
+              onClearAllDummyData={handleClearAllData}
+              onNavigateToCetakRapor={() => setActiveTab('cetak-rapor')}
+              onNavigateToImporNilai={() => setActiveTab('dapodik-sync')}
+            />
+          )}
+
           {activeTab === 'cetak-rapor' && (
             <CetakRaporView
               students={students}
@@ -666,7 +683,7 @@ export function App() {
             />
           )}
 
-          {(activeTab === 'dapodik' || activeTab === 'dapodik-sync') && (
+          {(activeTab === 'dapodik' || activeTab === 'dapodik-sync' || activeTab === 'impor-nilai') && (
             <DapodikSyncView
               students={students}
               subjects={subjects}
@@ -677,32 +694,23 @@ export function App() {
               onSelectClassLevel={handleSelectClassLevel}
               onImportStudents={(newStudents) => {
                 setStudents(newStudents);
-                // Auto initialize grades for new students
-                const newGradesList: NilaiSiswaMapel[] = [];
-                newStudents.forEach((std) => {
-                  subjects.forEach((subj) => {
-                    newGradesList.push({
-                      studentId: std.id,
-                      subjectId: subj.id,
-                      formatifScores: [80, 85],
-                      formatifNotes: 'Pengamatan harian dan kuis',
-                      sumatifLM: subj.tujuanPembelajaran.map((tp) => ({
-                        tpId: tp.id,
-                        tpCode: tp.code,
-                        tpDescription: tp.description,
-                        score: 80,
-                      })),
-                      sumatifSAS: 80,
-                      rataRataLM: 80,
-                      nilaiAkhir: 80,
-                      predikat: 'Baik',
-                      narasiRapor: `Ananda ${std.name} menunjukkan penguasaan yang baik pada materi pembelajaran ${subj.name}.`,
-                      isAIGenerated: false,
-                    });
-                  });
-                });
-                setGrades(newGradesList);
               }}
+              onUpdateGrades={(newGrades) => {
+                setGrades((prev) => {
+                  const updated = [...prev];
+                  newGrades.forEach((ng) => {
+                    const idx = updated.findIndex((g) => g.studentId === ng.studentId && g.subjectId === ng.subjectId);
+                    if (idx >= 0) {
+                      updated[idx] = { ...updated[idx], ...ng };
+                    } else {
+                      updated.push(ng);
+                    }
+                  });
+                  return updated;
+                });
+                logAudit('Impor Excel', `Mengimpor nilai mata pelajaran untuk ${newGrades.length} baris nilai`);
+              }}
+              onNavigateToTarikData={() => setActiveTab('tarik-data')}
             />
           )}
 

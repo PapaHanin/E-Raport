@@ -323,6 +323,7 @@ export type ActiveTab =
   | 'gradebook'
   | 'ai-narasi'
   | 'projek-p5'
+  | 'tarik-data'
   | 'cetak-rapor'
   | 'whatsapp-gateway'
   | 'dapodik-sync'

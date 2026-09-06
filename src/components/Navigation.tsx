@@ -19,6 +19,8 @@ import {
   Lock,
   X,
   Layers,
+  UserCheck,
+  FileSpreadsheet,
 } from 'lucide-react';
 
 interface NavigationProps {
@@ -105,6 +107,16 @@ export const Navigation: React.FC<NavigationProps> = ({
 
     // 2. Cetak & Laporan
     {
+      id: 'tarik-data',
+      aliases: ['tarik-data-siswa', 'ogomojolo-sync', 'tarik'],
+      label: 'Tarik Data Siswa',
+      shortLabel: 'Tarik Data',
+      icon: <UserCheck className="w-5 h-5 shrink-0 text-emerald-400" />,
+      badge: 'Auto Sync',
+      badgeColor: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 font-bold',
+      category: 'cetak',
+    },
+    {
       id: 'cetak-rapor',
       label: 'Cetak E-Rapor PDF',
       shortLabel: 'E-Rapor',
@@ -127,10 +139,12 @@ export const Navigation: React.FC<NavigationProps> = ({
     // 3. Data & Sinkronisasi
     {
       id: 'dapodik-sync',
-      aliases: ['dapodik'],
-      label: 'Impor Dapodik / Excel',
-      shortLabel: 'Dapodik',
-      icon: <Database className="w-5 h-5 shrink-0 text-blue-400" />,
+      aliases: ['dapodik', 'impor-nilai'],
+      label: 'Impor Nilai (Dapodik / Excel)',
+      shortLabel: 'Impor Nilai',
+      icon: <FileSpreadsheet className="w-5 h-5 shrink-0 text-blue-400" />,
+      badge: 'Khusus Nilai',
+      badgeColor: 'bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300 font-bold',
       category: 'data',
     },
     {

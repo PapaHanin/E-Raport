@@ -287,6 +287,119 @@ export function downloadExcelTemplate(activeClassLevel: ClassLevel = 'Kelas 4') 
 }
 
 /**
+ * Downloads an Excel template specifically designed for importing student grades.
+ * Pre-populates students of the active class so teachers can immediately type their scores.
+ */
+export function downloadGradeTemplateExcel(
+  activeClassLevel: ClassLevel = 'Kelas 4',
+  students: Student[] = [],
+  subjects: MataPelajaran[] = []
+) {
+  const wb = XLSX.utils.book_new();
+  const classStudents = students.filter(
+    (std) => std.gradeLevel === activeClassLevel || (!std.gradeLevel && activeClassLevel === 'Kelas 4')
+  );
+  const classSubjects = getSubjectsForClass(subjects, activeClassLevel);
+
+  const nilaiHeaders = [
+    'No',
+    'NISN (Wajib)',
+    'Nama Siswa (Wajib)',
+    'Mata Pelajaran (Wajib)',
+    'LM 1 (0-100)',
+    'LM 2 (0-100)',
+    'LM 3 (0-100)',
+    'LM 4 (0-100)',
+    'Nilai SAS (0-100)',
+    'Nilai Akhir (Opsional)',
+    'Catatan / Narasi Capaian Rapor (Opsional)',
+  ];
+
+  const rows: any[] = [];
+  let rowNo = 1;
+
+  if (classStudents.length > 0 && classSubjects.length > 0) {
+    classStudents.forEach((std) => {
+      classSubjects.forEach((subj) => {
+        rows.push([
+          rowNo++,
+          std.nisn || '',
+          std.name,
+          subj.name,
+          85,
+          88,
+          82,
+          90,
+          86,
+          '',
+          `Menunjukkan penguasaan yang sangat baik dalam materi ${subj.name}.`,
+        ]);
+      });
+    });
+  } else {
+    // Fallback sample data
+    rows.push([
+      1,
+      '0123456781',
+      'Ahmad Fauzan Pratama',
+      'Pendidikan Pancasila',
+      88,
+      90,
+      85,
+      92,
+      88,
+      89,
+      'Menunjukkan penguasaan yang sangat baik dalam memahami norma dan aturan.',
+    ]);
+    rows.push([
+      2,
+      '0123456781',
+      'Ahmad Fauzan Pratama',
+      'Bahasa Indonesia',
+      85,
+      82,
+      88,
+      90,
+      86,
+      86,
+      'Sangat terampil dalam menyusun paragraf deskripsi.',
+    ]);
+  }
+
+  const wsNilai = XLSX.utils.aoa_to_sheet([nilaiHeaders, ...rows]);
+  wsNilai['!cols'] = [
+    { wch: 6 },
+    { wch: 18 },
+    { wch: 28 },
+    { wch: 24 },
+    { wch: 14 },
+    { wch: 14 },
+    { wch: 14 },
+    { wch: 14 },
+    { wch: 16 },
+    { wch: 20 },
+    { wch: 55 },
+  ];
+  XLSX.utils.book_append_sheet(wb, wsNilai, 'NILAI_MAPEL');
+
+  const petunjuk = [
+    ['PETUNJUK IMPOR NILAI MATA PELAJARAN e-RAPOR'],
+    [''],
+    ['1. Data siswa (Nama & NISN) harus sudah ditarik terlebih dahulu dari navigasi "Tarik Data Siswa".'],
+    ['2. Nilai LM 1 - LM 4 adalah nilai Sumatif Lingkup Materi (rentang 0 s.d. 100).'],
+    ['3. Nilai SAS adalah Sumatif Akhir Semester (rentang 0 s.d. 100).'],
+    ['4. Nilai Akhir (NA) otomatis dihitung oleh sistem jika dikosongkan: NA = (Rata-rata LM × 60%) + (SAS × 40%).'],
+    ['5. Narasi Capaian dapat diisi manual atau digenerate otomatis menggunakan kecerdasan AI di menu AI Narasi.'],
+  ];
+  const wsPetunjuk = XLSX.utils.aoa_to_sheet(petunjuk);
+  wsPetunjuk['!cols'] = [{ wch: 90 }];
+  XLSX.utils.book_append_sheet(wb, wsPetunjuk, 'PETUNJUK');
+
+  const fileName = `Format_Impor_Nilai_${activeClassLevel.replace(/\s+/g, '_')}.xlsx`;
+  XLSX.writeFile(wb, fileName);
+}
+
+/**
  * Exports all active class students and their complete grades, presensi, and notes into an Excel (.xlsx) file.
  */
 export function exportClassDataToExcel(

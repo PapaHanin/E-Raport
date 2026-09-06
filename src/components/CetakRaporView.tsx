@@ -1256,6 +1256,42 @@ export const CetakRaporView: React.FC<CetakRaporViewProps> = ({
           </div>
         </div>
 
+        {/* Quick Class Level Switcher Bar */}
+        <div className="flex items-center gap-2 overflow-x-auto pb-1">
+          <span className="text-xs font-bold text-slate-500 dark:text-slate-400 shrink-0 mr-1">
+            Pilih Kelas:
+          </span>
+          {classLevels.map((lvl) => {
+            const count = students.filter(
+              (s) => s.gradeLevel === lvl || (!s.gradeLevel && lvl === 'Kelas 4')
+            ).length;
+            const isSelected = activeClassLevel === lvl;
+            return (
+              <button
+                key={lvl}
+                type="button"
+                onClick={() => onSelectClassLevel && onSelectClassLevel(lvl)}
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer whitespace-nowrap ${
+                  isSelected
+                    ? 'bg-indigo-600 text-white shadow-xs font-black ring-2 ring-indigo-300 dark:ring-indigo-700'
+                    : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700'
+                }`}
+              >
+                <span>{lvl}</span>
+                <span
+                  className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono font-black ${
+                    isSelected
+                      ? 'bg-white/25 text-white'
+                      : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300'
+                  }`}
+                >
+                  {count} siswa
+                </span>
+              </button>
+            );
+          })}
+        </div>
+
         {/* Compact Settings & Signature Mode Strip */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-2.5 bg-slate-50 dark:bg-slate-800/60 rounded-2xl border border-slate-200 dark:border-slate-700/80">
           <div className="flex items-center gap-2">

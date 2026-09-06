@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   Student,
   MataPelajaran,
@@ -6,9 +6,8 @@ import {
   RaporSiswaDetail,
   ClassLevel,
   SchoolProfile,
-  getFaseByClass,
 } from '../types';
-import { initialSchoolProfile } from '../data/initialData';
+import { initialSchoolProfile, getSubjectsForClass } from '../data/initialData';
 import {
   Upload,
   Download,
@@ -25,17 +24,16 @@ import {
   X,
   Layers,
   FileCheck,
-  HelpCircle,
+  UserCheck,
+  Check,
+  Calculator,
+  Search,
 } from 'lucide-react';
 import {
-  downloadExcelTemplate,
+  downloadGradeTemplateExcel,
   exportClassDataToExcel,
-  inspectExcelOrCSVFile,
-  validateAndTransformRows,
-  ColumnMapping,
-  InspectResult,
-  ValidationSummary,
 } from '../utils/excelService';
+import * as XLSX from 'xlsx';
 
 interface DapodikSyncViewProps {
   students: Student[];
@@ -45,7 +43,38 @@ interface DapodikSyncViewProps {
   schoolProfile?: SchoolProfile;
   activeClassLevel?: ClassLevel;
   onSelectClassLevel?: (classLevel: ClassLevel) => void;
-  onImportStudents: (newStudents: Student[]) => void;
+  onImportStudents?: (newStudents: Student[]) => void;
+  onUpdateGrades?: (newGrades: NilaiSiswaMapel[]) => void;
+  onNavigateToTarikData?: () => void;
+}
+
+interface GradeColumnMapping {
+  nisn: number;
+  studentName: number;
+  subjectName: number;
+  lm1: number;
+  lm2: number;
+  lm3: number;
+  lm4: number;
+  sas: number;
+  nilaiAkhir: number;
+  narasi: number;
+}
+
+interface GradeRowValidationItem {
+  rowNumber: number;
+  studentId: string;
+  studentName: string;
+  nisn: string;
+  subjectId: string;
+  subjectName: string;
+  rataRataLM: number;
+  sumatifSAS: number;
+  nilaiAkhir: number;
+  predikat: 'Sangat Baik' | 'Baik' | 'Cukup' | 'Perlu Bimbingan';
+  narasiRapor: string;
+  status: 'valid' | 'warning' | 'error';
+  messages: string[];
 }
 
 export const DapodikSyncView: React.FC<DapodikSyncViewProps> = ({
@@ -57,31 +86,174 @@ export const DapodikSyncView: React.FC<DapodikSyncViewProps> = ({
   activeClassLevel = 'Kelas 4',
   onSelectClassLevel,
   onImportStudents,
+  onUpdateGrades,
+  onNavigateToTarikData,
 }) => {
   const classLevels: ClassLevel[] = ['Kelas 1', 'Kelas 2', 'Kelas 3', 'Kelas 4', 'Kelas 5', 'Kelas 6'];
 
   // Inspection & Mapping State
-  const [inspectData, setInspectData] = useState<InspectResult | null>(null);
-  const [columnMapping, setColumnMapping] = useState<ColumnMapping | null>(null);
-  const [validationSummary, setValidationSummary] = useState<ValidationSummary | null>(null);
+  const [sheetNames, setSheetNames] = useState<string[]>([]);
+  const [selectedSheet, setSelectedSheet] = useState<string>('');
+  const [headers, setHeaders] = useState<string[]>([]);
+  const [rawRows, setRawRows] = useState<any[][]>([]);
+  const [columnMapping, setColumnMapping] = useState<GradeColumnMapping | null>(null);
+  const [validationItems, setValidationItems] = useState<GradeRowValidationItem[]>([]);
   const [uploadedFileName, setUploadedFileName] = useState<string>('');
 
-  // UI view controls
+  // UI state
   const [filterTab, setFilterTab] = useState<'all' | 'error' | 'warning' | 'valid'>('all');
-  const [skipErrors, setSkipErrors] = useState<boolean>(true);
   const [showMappingPanel, setShowMappingPanel] = useState<boolean>(true);
   const [csvText, setCsvText] = useState<string>('');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [isProcessingFile, setIsProcessingFile] = useState<boolean>(false);
+  const [searchTableQuery, setSearchTableQuery] = useState<string>('');
 
-  // Re-run validation whenever mapping changes or activeClassLevel changes
-  const applyMappingAndValidate = (newMapping: ColumnMapping, currentInspect = inspectData) => {
-    if (!currentInspect) return;
-    const targetClass = (activeClassLevel || 'Kelas 4') as ClassLevel;
-    const summary = validateAndTransformRows(currentInspect.rawRows, newMapping, targetClass);
-    setValidationSummary(summary);
-    setColumnMapping(newMapping);
+  // Active class students & subjects
+  const classStudents = useMemo(() => {
+    return students.filter(
+      (s) => s.gradeLevel === activeClassLevel || (!s.gradeLevel && activeClassLevel === 'Kelas 4')
+    );
+  }, [students, activeClassLevel]);
+
+  const classSubjects = useMemo(() => {
+    return getSubjectsForClass(subjects, activeClassLevel);
+  }, [subjects, activeClassLevel]);
+
+  // Detect column mapping for grades
+  const detectGradeColumnMapping = (headerList: string[]): GradeColumnMapping => {
+    const norm = headerList.map((h) => String(h || '').trim().toLowerCase());
+    const findCol = (keywords: string[]): number => {
+      return norm.findIndex((h) => keywords.some((k) => h.includes(k)));
+    };
+
+    return {
+      nisn: findCol(['nisn', 'no nisn', 'nomor induk']),
+      studentName: findCol(['nama siswa', 'nama murid', 'nama lengkap', 'nama peserta', 'nama']),
+      subjectName: findCol(['mata pelajaran', 'mapel', 'pelajaran', 'subject']),
+      lm1: findCol(['lm 1', 'lm1', 'tp 1', 'tp1', 'formatif 1', 'lingkup materi 1']),
+      lm2: findCol(['lm 2', 'lm2', 'tp 2', 'tp2', 'formatif 2', 'lingkup materi 2']),
+      lm3: findCol(['lm 3', 'lm3', 'tp 3', 'tp3', 'formatif 3', 'lingkup materi 3']),
+      lm4: findCol(['lm 4', 'lm4', 'tp 4', 'tp4', 'formatif 4', 'lingkup materi 4']),
+      sas: findCol(['sas', 'sumatif akhir semester', 'pas', 'uas', 'ujian semester', 'nilai sas']),
+      nilaiAkhir: findCol(['nilai akhir', 'na', 'nilai rapor', 'rapor']),
+      narasi: findCol(['catatan', 'narasi', 'capaian', 'deskripsi', 'keterangan']),
+    };
+  };
+
+  // Helper to match subject name
+  const resolveSubject = (rawSubject: string): MataPelajaran | undefined => {
+    if (!rawSubject) return classSubjects[0];
+    const clean = rawSubject.trim().toLowerCase();
+    // Direct or includes match
+    return (
+      classSubjects.find((s) => s.name.toLowerCase() === clean) ||
+      classSubjects.find((s) => s.name.toLowerCase().includes(clean) || clean.includes(s.name.toLowerCase())) ||
+      classSubjects[0]
+    );
+  };
+
+  // Helper to match student by NISN or name
+  const resolveStudent = (rawNisn: string, rawName: string): Student | undefined => {
+    const cleanNisn = String(rawNisn || '').trim();
+    const cleanName = String(rawName || '').trim().toLowerCase();
+
+    if (cleanNisn) {
+      const matchByNisn = students.find((s) => s.nisn && s.nisn.trim() === cleanNisn);
+      if (matchByNisn) return matchByNisn;
+    }
+
+    if (cleanName) {
+      const matchByName = students.find((s) => s.name.trim().toLowerCase() === cleanName);
+      if (matchByName) return matchByName;
+      const fuzzyByName = students.find((s) => s.name.trim().toLowerCase().includes(cleanName) || cleanName.includes(s.name.trim().toLowerCase()));
+      if (fuzzyByName) return fuzzyByName;
+    }
+
+    return undefined;
+  };
+
+  // Validate and transform raw score rows
+  const validateGradeRows = (rows: any[][], mapping: GradeColumnMapping): GradeRowValidationItem[] => {
+    return rows
+      .map((row, idx): GradeRowValidationItem | null => {
+        if (!row || row.length === 0 || row.every((c) => c === null || c === undefined || c === '')) {
+          return null;
+        }
+
+        const rawNisn = mapping.nisn >= 0 ? String(row[mapping.nisn] || '').trim() : '';
+        const rawName = mapping.studentName >= 0 ? String(row[mapping.studentName] || '').trim() : '';
+        const rawSubject = mapping.subjectName >= 0 ? String(row[mapping.subjectName] || '').trim() : '';
+        const rawLM1 = mapping.lm1 >= 0 ? parseFloat(String(row[mapping.lm1]).replace(',', '.')) : NaN;
+        const rawLM2 = mapping.lm2 >= 0 ? parseFloat(String(row[mapping.lm2]).replace(',', '.')) : NaN;
+        const rawLM3 = mapping.lm3 >= 0 ? parseFloat(String(row[mapping.lm3]).replace(',', '.')) : NaN;
+        const rawLM4 = mapping.lm4 >= 0 ? parseFloat(String(row[mapping.lm4]).replace(',', '.')) : NaN;
+        const rawSAS = mapping.sas >= 0 ? parseFloat(String(row[mapping.sas]).replace(',', '.')) : NaN;
+        const rawNA = mapping.nilaiAkhir >= 0 ? parseFloat(String(row[mapping.nilaiAkhir]).replace(',', '.')) : NaN;
+        const rawNarasi = mapping.narasi >= 0 ? String(row[mapping.narasi] || '').trim() : '';
+
+        const messages: string[] = [];
+        let status: 'valid' | 'warning' | 'error' = 'valid';
+
+        // Match student
+        const matchedStudent = resolveStudent(rawNisn, rawName);
+        if (!matchedStudent) {
+          status = 'error';
+          messages.push(`Siswa "${rawName || rawNisn || 'Baris ' + (idx + 1)}" tidak ditemukan di e-Rapor. Tarik data siswa terlebih dahulu di menu "Tarik Data Siswa".`);
+        }
+
+        // Match subject
+        const matchedSubj = resolveSubject(rawSubject);
+        if (!matchedSubj) {
+          status = 'warning';
+          messages.push(`Mata pelajaran "${rawSubject}" diselaraskan dengan mapel kelas: ${classSubjects[0]?.name || 'Utama'}`);
+        }
+
+        // Calculate LM Average
+        const validLMs = [rawLM1, rawLM2, rawLM3, rawLM4].filter((n) => !isNaN(n) && n >= 0 && n <= 100);
+        let avgLM = validLMs.length > 0 ? Math.round(validLMs.reduce((a, b) => a + b, 0) / validLMs.length) : 80;
+        let sasScore = !isNaN(rawSAS) && rawSAS >= 0 && rawSAS <= 100 ? Math.round(rawSAS) : 80;
+
+        if (validLMs.length === 0 && isNaN(rawSAS) && isNaN(rawNA)) {
+          status = 'warning';
+          messages.push('Nilai angka kosong/tidak valid. Diberi nilai default 80.');
+        }
+
+        let calculatedNA = !isNaN(rawNA) && rawNA >= 0 && rawNA <= 100
+          ? Math.round(rawNA)
+          : Math.round(avgLM * 0.6 + sasScore * 0.4);
+
+        let predikat: 'Sangat Baik' | 'Baik' | 'Cukup' | 'Perlu Bimbingan' = 'Baik';
+        if (calculatedNA >= 90) predikat = 'Sangat Baik';
+        else if (calculatedNA >= 80) predikat = 'Baik';
+        else if (calculatedNA >= 70) predikat = 'Cukup';
+        else predikat = 'Perlu Bimbingan';
+
+        const finalStudentId = matchedStudent?.id || `unknown-${idx}`;
+        const finalStudentName = matchedStudent?.name || rawName || 'Siswa Tidak Dikenal';
+        const finalNisn = matchedStudent?.nisn || rawNisn || '-';
+        const finalSubjectId = matchedSubj?.id || classSubjects[0]?.id || 's-1';
+        const finalSubjectName = matchedSubj?.name || rawSubject || 'Mata Pelajaran';
+
+        const defaultNarasi = `Ananda ${finalStudentName} menunjukkan penguasaan yang ${predikat.toLowerCase()} dalam materi ${finalSubjectName}.`;
+
+        return {
+          rowNumber: idx + 1,
+          studentId: finalStudentId,
+          studentName: finalStudentName,
+          nisn: finalNisn,
+          subjectId: finalSubjectId,
+          subjectName: finalSubjectName,
+          rataRataLM: avgLM,
+          sumatifSAS: sasScore,
+          nilaiAkhir: calculatedNA,
+          predikat,
+          narasiRapor: rawNarasi || defaultNarasi,
+          status,
+          messages,
+        };
+      })
+      .filter((i): i is GradeRowValidationItem => i !== null);
   };
 
   // Handle uploaded Excel/CSV file
@@ -95,145 +267,179 @@ export const DapodikSyncView: React.FC<DapodikSyncViewProps> = ({
     setUploadedFileName(file.name);
 
     try {
-      const inspect = await inspectExcelOrCSVFile(file);
-      setInspectData(inspect);
-      setColumnMapping(inspect.suggestedMapping);
-      const targetClass = (activeClassLevel || 'Kelas 4') as ClassLevel;
-      const summary = validateAndTransformRows(inspect.rawRows, inspect.suggestedMapping, targetClass);
-      setValidationSummary(summary);
+      const data = new Uint8Array(await file.arrayBuffer());
+      const workbook = XLSX.read(data, { type: 'array' });
+
+      if (!workbook.SheetNames || workbook.SheetNames.length === 0) {
+        throw new Error('Berkas tidak memiliki sheet data.');
+      }
+
+      // Prefer sheet that has 'NILAI' in its name, otherwise first sheet
+      const preferredSheet =
+        workbook.SheetNames.find((s) => s.toUpperCase().includes('NILAI')) ||
+        workbook.SheetNames[0];
+
+      const worksheet = workbook.Sheets[preferredSheet];
+      const sheetData = XLSX.utils.sheet_to_json<any[]>(worksheet, {
+        header: 1,
+        blankrows: false,
+        defval: '',
+      });
+
+      if (sheetData.length < 2) {
+        throw new Error(`Sheet "${preferredSheet}" tidak memiliki cukup baris data (minimal header + 1 baris).`);
+      }
+
+      const rawHeaderRow = sheetData[0].map((h: any) => String(h || '').trim());
+      const contentRows = sheetData.slice(1);
+
+      setSheetNames(workbook.SheetNames);
+      setSelectedSheet(preferredSheet);
+      setHeaders(rawHeaderRow);
+      setRawRows(contentRows);
+
+      const mapping = detectGradeColumnMapping(rawHeaderRow);
+      setColumnMapping(mapping);
+
+      const validated = validateGradeRows(contentRows, mapping);
+      setValidationItems(validated);
+
       setSuccessMessage(
-        `Berkas "${file.name}" berhasil dianalisis: ${inspect.rawRows.length} baris data ditemukan pada sheet "${inspect.selectedSheet}".`
+        `Berkas "${file.name}" berhasil dibaca: ${contentRows.length} baris nilai diuraikan dari sheet "${preferredSheet}".`
       );
     } catch (err: any) {
       setErrorMessage(`Gagal memproses berkas Excel: ${err.message || 'Format tidak dikenali'}`);
-      setInspectData(null);
-      setValidationSummary(null);
+      setRawRows([]);
+      setValidationItems([]);
     } finally {
       setIsProcessingFile(false);
       e.target.value = '';
     }
   };
 
-  // Handle manual CSV paste
+  // Handle manual CSV paste for grades
   const handleParseManualCSV = (rawText: string) => {
     if (!rawText.trim()) return;
     try {
       const lines = rawText.trim().split('\n');
       if (lines.length < 2) {
-        setErrorMessage('Data CSV harus memiliki baris header dan minimal 1 baris data siswa.');
+        setErrorMessage('Data CSV harus memiliki baris header dan minimal 1 baris nilai siswa.');
         return;
       }
-      const headers = lines[0].split(',').map((h) => h.replace(/^"|"$/g, '').trim());
-      const rawRows = lines.slice(1).map((l) => l.split(',').map((c) => c.replace(/^"|"$/g, '').trim()));
+      const headerLine = lines[0].split(',').map((h) => h.replace(/^"|"$/g, '').trim());
+      const contentLines = lines.slice(1).map((l) => l.split(',').map((c) => c.replace(/^"|"$/g, '').trim()));
 
-      const inspect: InspectResult = {
-        sheetNames: ['CSV_Input'],
-        selectedSheet: 'CSV_Input',
-        headers,
-        rawRows,
-        suggestedMapping: {
-          nisn: headers.findIndex((h) => h.toLowerCase().includes('nisn')),
-          nis: headers.findIndex((h) => h.toLowerCase().includes('nis') && !h.toLowerCase().includes('nisn')),
-          name: headers.findIndex((h) => h.toLowerCase().includes('nama')),
-          gender: headers.findIndex((h) => h.toLowerCase().includes('kelamin') || h.toLowerCase().includes('l/p')),
-          gradeLevel: headers.findIndex((h) => h.toLowerCase().includes('kelas')),
-          parentName: headers.findIndex((h) => h.toLowerCase().includes('wali') || h.toLowerCase().includes('ortu')),
-          parentPhone: headers.findIndex((h) => h.toLowerCase().includes('wa') || h.toLowerCase().includes('hp')),
-          address: headers.findIndex((h) => h.toLowerCase().includes('alamat')),
-          birthDate: headers.findIndex((h) => h.toLowerCase().includes('lahir')),
-        },
-      };
+      setUploadedFileName('Teks_CSV_Nilai.csv');
+      setSheetNames(['CSV_Input']);
+      setSelectedSheet('CSV_Input');
+      setHeaders(headerLine);
+      setRawRows(contentLines);
 
-      setUploadedFileName('Teks_CSV_Manual.csv');
-      setInspectData(inspect);
-      setColumnMapping(inspect.suggestedMapping);
-      const targetClass = (activeClassLevel || 'Kelas 4') as ClassLevel;
-      const summary = validateAndTransformRows(inspect.rawRows, inspect.suggestedMapping, targetClass);
-      setValidationSummary(summary);
+      const mapping = detectGradeColumnMapping(headerLine);
+      setColumnMapping(mapping);
+
+      const validated = validateGradeRows(contentLines, mapping);
+      setValidationItems(validated);
       setErrorMessage(null);
-      setSuccessMessage(`Berhasil menguraikan ${rawRows.length} baris dari teks CSV manual.`);
+      setSuccessMessage(`Berhasil menganalisis ${contentLines.length} baris nilai dari teks CSV.`);
     } catch (err: any) {
       setErrorMessage(`Gagal memproses CSV: ${err.message}`);
     }
   };
 
-  // Change individual column mapping dropdown
-  const handleColumnMappingChange = (field: keyof ColumnMapping, columnIndex: number) => {
-    if (!columnMapping || !inspectData) return;
-    const updated: ColumnMapping = {
-      ...columnMapping,
-      [field]: columnIndex,
-    };
-    applyMappingAndValidate(updated, inspectData);
-  };
+  // Commit valid grades to main state
+  const handleCommitGrades = () => {
+    const validRows = validationItems.filter((item) => item.status !== 'error');
 
-  // Commit valid students to main state
-  const handleCommitImport = () => {
-    if (!validationSummary) return;
-
-    const toImport = skipErrors
-      ? validationSummary.studentsToImport
-      : validationSummary.items.map((i) => i.student);
-
-    if (toImport.length === 0) {
-      setErrorMessage('Tidak ada data siswa yang dapat diimpor. Periksa kolom atau baris kesalahan.');
+    if (validRows.length === 0) {
+      setErrorMessage('Tidak ada data nilai yang valid untuk diimpor. Pastikan siswa sudah terdaftar di e-Rapor.');
       return;
     }
 
-    onImportStudents(toImport);
+    const transformedGrades: NilaiSiswaMapel[] = validRows.map((row) => ({
+      studentId: row.studentId,
+      subjectId: row.subjectId,
+      tpScores: {},
+      sumatifScores: {},
+      rataRataLM: row.rataRataLM,
+      sumatifSAS: row.sumatifSAS,
+      nilaiAkhir: row.nilaiAkhir,
+      predikat: row.predikat,
+      narasiRapor: row.narasiRapor,
+      isAutoNarasi: false,
+    }));
+
+    if (onUpdateGrades) {
+      onUpdateGrades(transformedGrades);
+    }
+
     setSuccessMessage(
-      `Sukses! ${toImport.length} siswa berhasil diimpor ke sistem rapor untuk ${activeClassLevel}.`
+      `Alhamdulillah! Berhasil mengimpor & menyimpan ${transformedGrades.length} data nilai mata pelajaran ke Buku Nilai e-Rapor.`
     );
 
-    // Reset inspection view after successful import
-    setInspectData(null);
-    setValidationSummary(null);
+    // Reset view
+    setRawRows([]);
+    setValidationItems([]);
     setColumnMapping(null);
     setCsvText('');
   };
 
-  const handleCancelInspection = () => {
-    setInspectData(null);
-    setValidationSummary(null);
-    setColumnMapping(null);
-  };
-
   // Filter items in preview table
-  const filteredValidationItems = validationSummary?.items.filter((item) => {
-    if (filterTab === 'error') return item.status === 'error';
-    if (filterTab === 'warning') return item.status === 'warning';
-    if (filterTab === 'valid') return item.status === 'valid';
-    return true;
-  }) || [];
+  const filteredItems = useMemo(() => {
+    return validationItems.filter((item) => {
+      if (filterTab === 'error' && item.status !== 'error') return false;
+      if (filterTab === 'warning' && item.status !== 'warning') return false;
+      if (filterTab === 'valid' && item.status !== 'valid') return false;
+
+      if (searchTableQuery.trim()) {
+        const q = searchTableQuery.toLowerCase();
+        const matchName = item.studentName.toLowerCase().includes(q);
+        const matchNisn = item.nisn.toLowerCase().includes(q);
+        const matchSubj = item.subjectName.toLowerCase().includes(q);
+        return matchName || matchNisn || matchSubj;
+      }
+      return true;
+    });
+  }, [validationItems, filterTab, searchTableQuery]);
+
+  const validCount = validationItems.filter((i) => i.status === 'valid').length;
+  const warningCount = validationItems.filter((i) => i.status === 'warning').length;
+  const errorCount = validationItems.filter((i) => i.status === 'error').length;
 
   return (
     <div className="space-y-6" id="dapodik-sync-container">
       {/* Top Hero Banner */}
-      <div className="bg-[#4F46E5] text-white rounded-[32px] sm:rounded-[40px] p-6 sm:p-8 shadow-xl shadow-indigo-500/20 border-2 border-indigo-400/40 relative overflow-hidden">
+      <div className="bg-gradient-to-r from-blue-700 via-indigo-700 to-slate-800 text-white rounded-[32px] sm:rounded-[40px] p-6 sm:p-8 shadow-xl shadow-blue-700/20 border-2 border-blue-500/30 relative overflow-hidden">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
-          <div className="space-y-2 max-w-2xl">
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-yellow-400 text-black text-xs font-black uppercase tracking-wider shadow-xs">
-              <FileSpreadsheet className="w-3.5 h-3.5 text-black" />
-              <span>Smart Excel & Sinkronisasi Dapodik</span>
+          <div className="space-y-2.5 max-w-2xl">
+            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-yellow-400 text-slate-950 text-xs font-black uppercase tracking-wider shadow-xs">
+              <FileSpreadsheet className="w-3.5 h-3.5 text-slate-950" />
+              <span>Khusus Impor Nilai Mata Pelajaran</span>
             </div>
             <h2 className="text-2xl sm:text-3xl font-black text-white tracking-tight">
-              Impor & Pemetaan Kolom Cerdas Excel / CSV
+              Impor Nilai Siswa (Dapodik / Excel / CSV)
             </h2>
-            <p className="text-indigo-100 text-xs sm:text-sm font-medium leading-relaxed">
-              Dilengkapi <strong>Smart Column Mapping</strong> otomatis dan <strong>Validasi Pra-Impor</strong> untuk mendeteksi NISN duplikat, kesalahan format, serta normalisasi data sebelum dimasukkan ke dalam buku nilai rapor.
+            <p className="text-blue-100 text-xs sm:text-sm font-medium leading-relaxed">
+              Unggah dan impor nilai siswa (Sumatif Lingkup Materi, Nilai SAS, Nilai Akhir, dan Narasi Capaian) ke dalam Buku Nilai rapor. Otomatis menghitung rata-rata, nilai akhir, dan predikat Kurikulum Merdeka.
             </p>
           </div>
 
-          {/* Quick Action Download Buttons */}
-          <div className="flex flex-col sm:flex-row gap-3">
+          {/* Quick Action Buttons */}
+          <div className="flex flex-col sm:flex-row gap-3 shrink-0">
             <button
               type="button"
-              id="btn-download-template-excel"
-              onClick={() => downloadExcelTemplate((activeClassLevel || 'Kelas 4') as ClassLevel)}
-              className="inline-flex items-center justify-center gap-2 px-5 py-3 rounded-2xl bg-yellow-400 hover:bg-yellow-300 text-black font-black text-xs sm:text-sm shadow-lg shadow-yellow-500/20 transition-all hover:scale-[1.02] cursor-pointer"
+              id="btn-download-grade-template"
+              onClick={() =>
+                downloadGradeTemplateExcel(
+                  (activeClassLevel || 'Kelas 4') as ClassLevel,
+                  students,
+                  subjects
+                )
+              }
+              className="inline-flex items-center justify-center gap-2 px-5 py-3 rounded-2xl bg-yellow-400 hover:bg-yellow-300 text-slate-950 font-black text-xs sm:text-sm shadow-lg shadow-yellow-500/20 transition-all hover:scale-[1.02] cursor-pointer"
             >
-              <Download className="w-4 h-4 text-black" />
-              <span>Unduh Format Excel (.xlsx)</span>
+              <Download className="w-4 h-4 text-slate-950" />
+              <span>Unduh Template Nilai ({activeClassLevel})</span>
             </button>
 
             <button
@@ -252,39 +458,61 @@ export const DapodikSyncView: React.FC<DapodikSyncViewProps> = ({
               className="inline-flex items-center justify-center gap-2 px-5 py-3 rounded-2xl bg-white/15 hover:bg-white/25 text-white font-bold text-xs sm:text-sm border border-white/20 transition-all cursor-pointer backdrop-blur-xs"
             >
               <FileSpreadsheet className="w-4 h-4 text-emerald-300" />
-              <span>Ekspor Rapor Kelas (.xlsx)</span>
+              <span>Ekspor Rekap Rapor (.xlsx)</span>
             </button>
           </div>
         </div>
       </div>
 
+      {/* Clear Separation Notice Banner */}
+      <div className="p-4 bg-emerald-50 dark:bg-emerald-950/50 border-2 border-emerald-300 dark:border-emerald-800 rounded-3xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-xs">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-2xl bg-emerald-100 dark:bg-emerald-900 flex items-center justify-center text-emerald-700 shrink-0">
+            <UserCheck className="w-5 h-5" />
+          </div>
+          <div>
+            <h4 className="font-black text-xs sm:text-sm text-emerald-950 dark:text-emerald-200">
+              Data Identitas Siswa Kini Otomatis Melalui Navigasi "Tarik Data Siswa"
+            </h4>
+            <p className="text-xs text-emerald-800 dark:text-emerald-300">
+              Tidak perlu mengimpor biodata siswa di sini. Navigasi ini khusus untuk mengisi atau mengunggah nilai mata pelajaran siswa.
+            </p>
+          </div>
+        </div>
+
+        {onNavigateToTarikData && (
+          <button
+            type="button"
+            onClick={onNavigateToTarikData}
+            className="inline-flex items-center justify-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black transition shadow-xs cursor-pointer shrink-0"
+          >
+            <span>Buka Navigasi Tarik Data Siswa</span>
+            <ArrowRight className="w-3.5 h-3.5" />
+          </button>
+        )}
+      </div>
+
       {/* Class Level Selector */}
       {onSelectClassLevel && (
-        <div className="bg-white dark:bg-slate-900 rounded-3xl p-4 border-2 border-indigo-100 dark:border-slate-800 shadow-xs flex items-center justify-between flex-wrap gap-3 transition-colors">
+        <div className="bg-white dark:bg-slate-900 rounded-3xl p-4 border-2 border-slate-200 dark:border-slate-800 shadow-xs flex items-center justify-between flex-wrap gap-3 transition-colors">
           <div className="flex items-center gap-2">
-            <GraduationCap className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
-            <span className="text-xs font-black text-gray-800 dark:text-slate-200 uppercase tracking-wider">
-              Target Tingkat Kelas Impor:
+            <GraduationCap className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+            <span className="text-xs font-black text-slate-800 dark:text-slate-200 uppercase tracking-wider">
+              Target Tingkat Kelas Impor Nilai:
             </span>
           </div>
-          <div className="flex items-center gap-1.5 bg-gray-100 dark:bg-slate-800 p-1 rounded-2xl overflow-x-auto">
+          <div className="flex items-center gap-1.5 bg-slate-100 dark:bg-slate-800 p-1 rounded-2xl overflow-x-auto">
             {classLevels.map((lvl) => {
               const isActive = lvl === activeClassLevel;
               return (
                 <button
                   key={lvl}
                   type="button"
-                  onClick={() => {
-                    onSelectClassLevel(lvl);
-                    if (inspectData && columnMapping) {
-                      const summary = validateAndTransformRows(inspectData.rawRows, columnMapping, lvl);
-                      setValidationSummary(summary);
-                    }
-                  }}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer ${
+                  onClick={() => onSelectClassLevel(lvl)}
+                  className={`px-3.5 py-1.5 rounded-xl text-xs font-black transition cursor-pointer ${
                     isActive
-                      ? 'bg-[#4F46E5] text-white shadow-xs scale-[1.02]'
-                      : 'text-gray-700 dark:text-slate-300 hover:text-indigo-700 hover:bg-white/80 dark:hover:bg-slate-700'
+                      ? 'bg-blue-600 text-white shadow-xs scale-[1.02]'
+                      : 'text-slate-700 dark:text-slate-300 hover:bg-white/80 dark:hover:bg-slate-700'
                   }`}
                 >
                   {lvl}
@@ -297,45 +525,55 @@ export const DapodikSyncView: React.FC<DapodikSyncViewProps> = ({
 
       {/* Notification Messages */}
       {successMessage && (
-        <div className="p-4 bg-emerald-50 dark:bg-emerald-950/60 border-2 border-emerald-300 dark:border-emerald-800 rounded-2xl text-emerald-800 dark:text-emerald-300 text-xs sm:text-sm font-bold flex items-center gap-2.5">
-          <CheckCircle2 className="w-5 h-5 text-emerald-600 dark:text-emerald-400 shrink-0" />
-          <span>{successMessage}</span>
+        <div className="p-4 bg-emerald-50 dark:bg-emerald-950/60 border-2 border-emerald-300 dark:border-emerald-800 rounded-2xl text-emerald-800 dark:text-emerald-300 text-xs sm:text-sm font-bold flex items-center justify-between gap-2.5">
+          <div className="flex items-center gap-2.5">
+            <CheckCircle2 className="w-5 h-5 text-emerald-600 dark:text-emerald-400 shrink-0" />
+            <span>{successMessage}</span>
+          </div>
+          <button type="button" onClick={() => setSuccessMessage(null)} className="text-slate-400 hover:text-slate-600 p-1 cursor-pointer">
+            <X className="w-4 h-4" />
+          </button>
         </div>
       )}
 
       {errorMessage && (
-        <div className="p-4 bg-rose-50 dark:bg-rose-950/60 border-2 border-rose-300 dark:border-rose-800 rounded-2xl text-rose-800 dark:text-rose-300 text-xs sm:text-sm font-bold flex items-center gap-2.5">
-          <AlertTriangle className="w-5 h-5 text-rose-600 dark:text-rose-400 shrink-0" />
-          <span>{errorMessage}</span>
+        <div className="p-4 bg-rose-50 dark:bg-rose-950/60 border-2 border-rose-300 dark:border-rose-800 rounded-2xl text-rose-800 dark:text-rose-300 text-xs sm:text-sm font-bold flex items-center justify-between gap-2.5">
+          <div className="flex items-center gap-2.5">
+            <AlertTriangle className="w-5 h-5 text-rose-600 dark:text-rose-400 shrink-0" />
+            <span>{errorMessage}</span>
+          </div>
+          <button type="button" onClick={() => setErrorMessage(null)} className="text-slate-400 hover:text-slate-600 p-1 cursor-pointer">
+            <X className="w-4 h-4" />
+          </button>
         </div>
       )}
 
-      {/* STEP 1: UPLOAD & INPUT AREA (When no file active) */}
-      {!inspectData && (
+      {/* STEP 1: UPLOAD AREA (When no active inspection) */}
+      {validationItems.length === 0 && (
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-          {/* Left: Drag & Drop File Upload + Paste (7 cols) */}
+          {/* Upload Box */}
           <div className="lg:col-span-7 space-y-4">
-            <div className="bg-white dark:bg-slate-900 rounded-[32px] border-2 border-indigo-100 dark:border-slate-800 shadow-xs p-6 space-y-4 transition-colors">
-              <div className="flex items-center justify-between pb-3 border-b border-gray-100 dark:border-slate-800">
-                <h3 className="font-black text-gray-900 dark:text-white text-base flex items-center gap-2">
-                  <Upload className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
-                  <span>Unggah Berkas Excel / CSV Siswa</span>
+            <div className="bg-white dark:bg-slate-900 rounded-[32px] border-2 border-blue-100 dark:border-slate-800 shadow-xs p-6 space-y-4 transition-colors">
+              <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
+                <h3 className="font-black text-slate-900 dark:text-white text-base flex items-center gap-2">
+                  <Upload className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+                  <span>Unggah Berkas Nilai (.xlsx / .csv)</span>
                 </h3>
-                <span className="text-xs font-bold text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-slate-800 px-2.5 py-1 rounded-full border border-indigo-200 dark:border-slate-700">
-                  .xlsx, .xls, .csv
+                <span className="text-xs font-bold text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-slate-800 px-2.5 py-1 rounded-full border border-blue-200 dark:border-slate-700">
+                  {activeClassLevel}
                 </span>
               </div>
 
               {/* Drag & Drop Upload Zone */}
-              <label className="flex flex-col items-center justify-center p-8 border-2 border-dashed border-indigo-300 dark:border-indigo-700 rounded-3xl bg-indigo-50/50 dark:bg-slate-800/50 hover:bg-indigo-50 dark:hover:bg-slate-800 transition-all cursor-pointer text-center group">
-                <div className="w-14 h-14 rounded-2xl bg-white dark:bg-slate-900 shadow-sm border border-indigo-200 dark:border-slate-700 flex items-center justify-center text-indigo-600 dark:text-indigo-400 group-hover:scale-110 transition-transform mb-3">
-                  <FileSpreadsheet className="w-7 h-7 text-emerald-600 dark:text-emerald-400" />
+              <label className="flex flex-col items-center justify-center p-8 border-2 border-dashed border-blue-300 dark:border-blue-700 rounded-3xl bg-blue-50/40 dark:bg-slate-800/40 hover:bg-blue-50 dark:hover:bg-slate-800 transition-all cursor-pointer text-center group">
+                <div className="w-14 h-14 rounded-2xl bg-white dark:bg-slate-900 shadow-sm border border-blue-200 dark:border-slate-700 flex items-center justify-center text-blue-600 dark:text-blue-400 group-hover:scale-110 transition-transform mb-3">
+                  <FileSpreadsheet className="w-7 h-7 text-blue-600 dark:text-blue-400" />
                 </div>
-                <p className="text-sm font-black text-gray-900 dark:text-white mb-1">
-                  {isProcessingFile ? 'Membaca dan menganalisis berkas...' : 'Klik untuk Pilih atau Tarik Berkas Excel ke Sini'}
+                <p className="text-sm font-black text-slate-900 dark:text-white mb-1">
+                  {isProcessingFile ? 'Menganalisis nilai siswa...' : 'Klik untuk Memilih atau Tarik Berkas Nilai ke Sini'}
                 </p>
-                <p className="text-xs text-gray-500 dark:text-slate-400 max-w-sm">
-                  Sistem otomatis mendeteksi kolom nama, NISN, jenis kelamin, dan nomor WA orang tua.
+                <p className="text-xs text-slate-500 dark:text-slate-400 max-w-sm">
+                  Otomatis mendeteksi kolom NISN, Nama Siswa, Mata Pelajaran, LM 1 s/d 4, dan SAS.
                 </p>
                 <input
                   type="file"
@@ -346,38 +584,38 @@ export const DapodikSyncView: React.FC<DapodikSyncViewProps> = ({
                 />
               </label>
 
-              {/* Paste Raw CSV Area as alternate */}
+              {/* Paste Raw CSV */}
               <div className="space-y-2 pt-2">
                 <div className="flex items-center justify-between">
-                  <label className="text-xs font-bold text-gray-700 dark:text-slate-300">
-                    Atau Tempel (Paste) Teks CSV Dapodik Manual:
+                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                    Atau Tempel (Paste) Teks CSV Nilai:
                   </label>
                   <button
                     type="button"
                     onClick={() => {
-                      const sample = `NISN,NIS,Nama Siswa,L/P,Kelas,Nama Wali,WhatsApp Ortu,Alamat\n0183456701,24001,Ahmad Fauzan Pratama,L,${activeClassLevel},H. Fauzan Pratama,081234567890,Jl. Merdeka No. 12 Jakarta\n0183456702,24002,Aisyah Putri Rahmadani,P,${activeClassLevel},Rahmat Hidayat,081298765432,Jl. Melati No. 5 Jakarta\n0183456703,24003,Bima Sakti Nugroho,L,${activeClassLevel},Bambang N.,081311223344,Jl. Sudirman 88`;
+                      const sampleStudent = classStudents[0]?.name || 'Ahmad Fauzan Pratama';
+                      const sampleNisn = classStudents[0]?.nisn || '0123456781';
+                      const sample = `NISN,Nama Siswa,Mata Pelajaran,LM 1,LM 2,LM 3,LM 4,Nilai SAS,Nilai Akhir,Catatan Capaian\n${sampleNisn},${sampleStudent},Pendidikan Pancasila,88,90,85,92,88,89,Menunjukkan penguasaan yang sangat baik dalam memahami norma aturan.\n${sampleNisn},${sampleStudent},Bahasa Indonesia,85,82,88,90,86,86,Sangat terampil dalam menyusun paragraf deskripsi.`;
                       setCsvText(sample);
                       handleParseManualCSV(sample);
                     }}
-                    className="text-[11px] font-bold text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer"
+                    className="text-[11px] font-bold text-blue-600 dark:text-blue-400 hover:underline cursor-pointer"
                   >
-                    Isi Contoh CSV
+                    Isi Contoh Nilai CSV
                   </button>
                 </div>
                 <textarea
                   value={csvText}
-                  onChange={(e) => {
-                    setCsvText(e.target.value);
-                  }}
+                  onChange={(e) => setCsvText(e.target.value)}
                   rows={3}
-                  placeholder="NISN,NIS,Nama Siswa,L/P,Kelas,Nama Wali,WhatsApp Ortu,Alamat..."
-                  className="w-full p-3 bg-gray-50 dark:bg-slate-800 text-gray-900 dark:text-slate-100 border border-gray-200 dark:border-slate-700 rounded-2xl text-xs font-mono"
+                  placeholder="NISN,Nama Siswa,Mata Pelajaran,LM 1,LM 2,LM 3,LM 4,Nilai SAS..."
+                  className="w-full p-3 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-slate-100 border border-slate-200 dark:border-slate-700 rounded-2xl text-xs font-mono"
                 />
                 {csvText.trim() && (
                   <button
                     type="button"
                     onClick={() => handleParseManualCSV(csvText)}
-                    className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all shadow-xs cursor-pointer"
+                    className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition shadow-xs cursor-pointer"
                   >
                     Analisis Teks CSV
                   </button>
@@ -386,42 +624,32 @@ export const DapodikSyncView: React.FC<DapodikSyncViewProps> = ({
             </div>
           </div>
 
-          {/* Right: Structure Guide (5 cols) */}
+          {/* Guide Box */}
           <div className="lg:col-span-5 space-y-4">
-            <div className="bg-white dark:bg-slate-900 rounded-[32px] border-2 border-indigo-100 dark:border-slate-800 shadow-xs p-6 space-y-4 transition-colors">
-              <h3 className="font-black text-gray-900 dark:text-white text-sm flex items-center gap-2">
-                <Info className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
-                <span>Fitur Pemetaan Kolom Cerdas</span>
+            <div className="bg-white dark:bg-slate-900 rounded-[32px] border-2 border-blue-100 dark:border-slate-800 shadow-xs p-6 space-y-4 transition-colors">
+              <h3 className="font-black text-slate-900 dark:text-white text-sm flex items-center gap-2">
+                <Info className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                <span>Format Pengisian Nilai e-Rapor</span>
               </h3>
 
               <div className="space-y-3 text-xs">
-                <div className="p-3.5 rounded-2xl bg-indigo-50/70 dark:bg-slate-800/80 border border-indigo-100 dark:border-slate-700 space-y-1">
-                  <div className="flex items-center gap-1.5 text-indigo-900 dark:text-indigo-300 font-bold">
-                    <Sparkles className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
-                    <span>Auto-Detect Header:</span>
+                <div className="p-3.5 rounded-2xl bg-blue-50/70 dark:bg-slate-800/80 border border-blue-100 dark:border-slate-700 space-y-1">
+                  <div className="flex items-center gap-1.5 text-blue-900 dark:text-blue-300 font-bold">
+                    <Sparkles className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+                    <span>Perhitungan Nilai Akhir Otomatis:</span>
                   </div>
-                  <p className="text-gray-600 dark:text-slate-400 leading-relaxed text-[11px]">
-                    Sistem otomatis mengenali variasi nama kolom seperti "Nama Peserta Didik", "Nama Murid", "JK", "Gender", atau "No WA".
+                  <p className="text-slate-600 dark:text-slate-400 leading-relaxed text-[11px]">
+                    Rumus Nilai Akhir (NA) = (Rata-rata LM × 60%) + (Nilai SAS × 40%). Jika kolom NA kosong, sistem otomatis menghitungnya.
                   </p>
                 </div>
 
                 <div className="p-3.5 rounded-2xl bg-emerald-50/70 dark:bg-slate-800/80 border border-emerald-200 dark:border-slate-700 space-y-1">
                   <div className="flex items-center gap-1.5 text-emerald-900 dark:text-emerald-300 font-bold">
                     <ShieldCheck className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
-                    <span>Validasi Pra-Impor:</span>
+                    <span>Penyelarasan Siswa Otomatis:</span>
                   </div>
-                  <p className="text-gray-600 dark:text-slate-400 leading-relaxed text-[11px]">
-                    Memeriksa baris data sebelum masuk database. Baris yang memiliki kesalahan dapat diperbaiki atau diabaikan secara aman.
-                  </p>
-                </div>
-
-                <div className="p-3.5 rounded-2xl bg-amber-50/70 dark:bg-slate-800/80 border border-amber-200 dark:border-slate-700 space-y-1">
-                  <div className="flex items-center gap-1.5 text-amber-900 dark:text-amber-300 font-bold">
-                    <Layers className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
-                    <span>Normalisasi Otomatis:</span>
-                  </div>
-                  <p className="text-gray-600 dark:text-slate-400 leading-relaxed text-[11px]">
-                    Nomor HP 08xx diubah otomatis menjadi format internasional 628xx untuk integrasi WhatsApp Gateway.
+                  <p className="text-slate-600 dark:text-slate-400 leading-relaxed text-[11px]">
+                    Sistem mencocokkan baris nilai dengan siswa terdaftar berdasarkan NISN atau Nama Lengkap secara akurat.
                   </p>
                 </div>
               </div>
@@ -429,11 +657,17 @@ export const DapodikSyncView: React.FC<DapodikSyncViewProps> = ({
               <div className="pt-2">
                 <button
                   type="button"
-                  onClick={() => downloadExcelTemplate((activeClassLevel || 'Kelas 4') as ClassLevel)}
-                  className="w-full inline-flex items-center justify-center gap-2 py-3 rounded-2xl bg-indigo-600 hover:bg-indigo-700 text-white font-black text-xs shadow-md shadow-indigo-600/20 transition-all cursor-pointer"
+                  onClick={() =>
+                    downloadGradeTemplateExcel(
+                      (activeClassLevel || 'Kelas 4') as ClassLevel,
+                      students,
+                      subjects
+                    )
+                  }
+                  className="w-full inline-flex items-center justify-center gap-2 py-3 rounded-2xl bg-blue-600 hover:bg-blue-700 text-white font-black text-xs shadow-md shadow-blue-600/20 transition cursor-pointer"
                 >
                   <Download className="w-4 h-4" />
-                  <span>Unduh Format Template Resmi (.xlsx)</span>
+                  <span>Unduh Format Template Nilai (.xlsx)</span>
                 </button>
               </div>
             </div>
@@ -441,382 +675,202 @@ export const DapodikSyncView: React.FC<DapodikSyncViewProps> = ({
         </div>
       )}
 
-      {/* STEP 2: SMART COLUMN MAPPING & PRE-FLIGHT VALIDATION (Active when inspectData is present) */}
-      {inspectData && validationSummary && columnMapping && (
+      {/* STEP 2: PRE-FLIGHT VALIDATION & GRADE TABLE (When inspection active) */}
+      {validationItems.length > 0 && (
         <div className="space-y-6 animate-fadeIn">
           {/* File Overview Banner */}
-          <div className="bg-white dark:bg-slate-900 rounded-[32px] border-2 border-indigo-200 dark:border-slate-800 p-6 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div className="bg-white dark:bg-slate-900 rounded-[32px] border-2 border-blue-200 dark:border-slate-800 p-6 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div className="flex items-center gap-3">
-              <div className="w-12 h-12 rounded-2xl bg-emerald-100 dark:bg-emerald-950/60 border border-emerald-300 dark:border-emerald-800 flex items-center justify-center text-emerald-600 dark:text-emerald-400 shrink-0">
+              <div className="w-12 h-12 rounded-2xl bg-blue-100 dark:bg-blue-950/60 border border-blue-300 dark:border-blue-800 flex items-center justify-center text-blue-600 dark:text-blue-400 shrink-0">
                 <FileCheck className="w-6 h-6" />
               </div>
               <div>
-                <div className="flex items-center gap-2">
-                  <h3 className="text-base font-black text-gray-900 dark:text-white">
-                    {uploadedFileName || 'Berkas Excel'}
-                  </h3>
-                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black bg-indigo-50 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800">
-                    Sheet: {inspectData.selectedSheet}
-                  </span>
-                </div>
-                <p className="text-xs text-gray-500 dark:text-slate-400">
-                  Ditemukan {inspectData.rawRows.length} baris data • {inspectData.headers.length} kolom terdeteksi
+                <h3 className="font-black text-slate-900 dark:text-white text-base">
+                  {uploadedFileName || 'Berkas Nilai Excel'}
+                </h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                  Sheet: <span className="font-bold text-slate-700 dark:text-slate-300">{selectedSheet}</span> • Total {validationItems.length} baris nilai dianalisis
                 </p>
               </div>
             </div>
 
-            <div className="flex items-center gap-2">
+            {/* Validation Pills */}
+            <div className="flex items-center gap-2 flex-wrap">
               <button
                 type="button"
-                onClick={() => setShowMappingPanel(!showMappingPanel)}
-                className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
-                  showMappingPanel
-                    ? 'bg-indigo-50 dark:bg-indigo-950/80 text-indigo-700 dark:text-indigo-300 border-indigo-300 dark:border-indigo-700'
-                    : 'bg-gray-50 dark:bg-slate-800 text-gray-700 dark:text-slate-300 border-gray-200 dark:border-slate-700'
+                onClick={() => setFilterTab('all')}
+                className={`px-3 py-1.5 rounded-xl text-xs font-black transition cursor-pointer ${
+                  filterTab === 'all'
+                    ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-900'
+                    : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300'
                 }`}
               >
-                <SlidersHorizontal className="w-3.5 h-3.5" />
-                <span>{showMappingPanel ? 'Sembunyikan Pemetaan' : 'Atur Pemetaan Kolom'}</span>
+                Semua ({validationItems.length})
               </button>
 
               <button
                 type="button"
-                onClick={handleCancelInspection}
-                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 border border-rose-200 dark:border-rose-900 transition-all cursor-pointer"
+                onClick={() => setFilterTab('valid')}
+                className={`px-3 py-1.5 rounded-xl text-xs font-black transition cursor-pointer ${
+                  filterTab === 'valid'
+                    ? 'bg-emerald-600 text-white'
+                    : 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300'
+                }`}
               >
-                <X className="w-3.5 h-3.5" />
-                <span>Ganti Berkas</span>
+                Valid ({validCount})
               </button>
-            </div>
-          </div>
 
-          {/* Smart Column Mapping Config Panel */}
-          {showMappingPanel && (
-            <div className="bg-white dark:bg-slate-900 rounded-[32px] border-2 border-indigo-200 dark:border-slate-800 p-6 shadow-sm space-y-4">
-              <div className="flex items-center justify-between pb-3 border-b border-gray-100 dark:border-slate-800">
-                <div>
-                  <h4 className="font-black text-gray-900 dark:text-white text-sm flex items-center gap-2">
-                    <Sparkles className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
-                    <span>Penyesuaian Kolom Cerdas (Smart Column Mapping)</span>
-                  </h4>
-                  <p className="text-xs text-gray-500 dark:text-slate-400">
-                    Periksa atau ubah pasangan kolom berkas Anda ke kolom sistem rapor Kurikulum Merdeka.
-                  </p>
-                </div>
-                <div className="text-[11px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/50 px-3 py-1 rounded-full border border-emerald-200 dark:border-emerald-800">
-                  ✨ Terpetakan Otomatis
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
-                {/* 1. Nama Siswa */}
-                <div className="p-3 bg-gray-50 dark:bg-slate-800/70 border border-gray-200 dark:border-slate-700 rounded-2xl space-y-1.5">
-                  <div className="flex items-center justify-between text-xs font-bold text-gray-900 dark:text-white">
-                    <span>Nama Siswa <span className="text-rose-500">*Wajib</span></span>
-                    {columnMapping.name !== -1 && (
-                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
-                    )}
-                  </div>
-                  <select
-                    value={columnMapping.name}
-                    onChange={(e) => handleColumnMappingChange('name', Number(e.target.value))}
-                    className="w-full text-xs font-medium bg-white dark:bg-slate-900 border border-gray-300 dark:border-slate-600 rounded-xl p-2 cursor-pointer"
-                  >
-                    <option value={-1}>-- Tidak Terpetakan --</option>
-                    {inspectData.headers.map((h, idx) => (
-                      <option key={idx} value={idx}>
-                        Kolom {idx + 1}: {h}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                {/* 2. NISN */}
-                <div className="p-3 bg-gray-50 dark:bg-slate-800/70 border border-gray-200 dark:border-slate-700 rounded-2xl space-y-1.5">
-                  <div className="flex items-center justify-between text-xs font-bold text-gray-900 dark:text-white">
-                    <span>NISN</span>
-                    {columnMapping.nisn !== -1 && (
-                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
-                    )}
-                  </div>
-                  <select
-                    value={columnMapping.nisn}
-                    onChange={(e) => handleColumnMappingChange('nisn', Number(e.target.value))}
-                    className="w-full text-xs font-medium bg-white dark:bg-slate-900 border border-gray-300 dark:border-slate-600 rounded-xl p-2 cursor-pointer"
-                  >
-                    <option value={-1}>-- Otomatis Digenerate --</option>
-                    {inspectData.headers.map((h, idx) => (
-                      <option key={idx} value={idx}>
-                        Kolom {idx + 1}: {h}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                {/* 3. NIS */}
-                <div className="p-3 bg-gray-50 dark:bg-slate-800/70 border border-gray-200 dark:border-slate-700 rounded-2xl space-y-1.5">
-                  <div className="flex items-center justify-between text-xs font-bold text-gray-900 dark:text-white">
-                    <span>NIS / NIPD</span>
-                    {columnMapping.nis !== -1 && (
-                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
-                    )}
-                  </div>
-                  <select
-                    value={columnMapping.nis}
-                    onChange={(e) => handleColumnMappingChange('nis', Number(e.target.value))}
-                    className="w-full text-xs font-medium bg-white dark:bg-slate-900 border border-gray-300 dark:border-slate-600 rounded-xl p-2 cursor-pointer"
-                  >
-                    <option value={-1}>-- Otomatis Digenerate --</option>
-                    {inspectData.headers.map((h, idx) => (
-                      <option key={idx} value={idx}>
-                        Kolom {idx + 1}: {h}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                {/* 4. Jenis Kelamin */}
-                <div className="p-3 bg-gray-50 dark:bg-slate-800/70 border border-gray-200 dark:border-slate-700 rounded-2xl space-y-1.5">
-                  <div className="flex items-center justify-between text-xs font-bold text-gray-900 dark:text-white">
-                    <span>Jenis Kelamin (L/P)</span>
-                    {columnMapping.gender !== -1 && (
-                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
-                    )}
-                  </div>
-                  <select
-                    value={columnMapping.gender}
-                    onChange={(e) => handleColumnMappingChange('gender', Number(e.target.value))}
-                    className="w-full text-xs font-medium bg-white dark:bg-slate-900 border border-gray-300 dark:border-slate-600 rounded-xl p-2 cursor-pointer"
-                  >
-                    <option value={-1}>-- Default: L --</option>
-                    {inspectData.headers.map((h, idx) => (
-                      <option key={idx} value={idx}>
-                        Kolom {idx + 1}: {h}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                {/* 5. WhatsApp Orang Tua */}
-                <div className="p-3 bg-gray-50 dark:bg-slate-800/70 border border-gray-200 dark:border-slate-700 rounded-2xl space-y-1.5">
-                  <div className="flex items-center justify-between text-xs font-bold text-gray-900 dark:text-white">
-                    <span>Nomor WhatsApp Wali</span>
-                    {columnMapping.parentPhone !== -1 && (
-                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
-                    )}
-                  </div>
-                  <select
-                    value={columnMapping.parentPhone}
-                    onChange={(e) => handleColumnMappingChange('parentPhone', Number(e.target.value))}
-                    className="w-full text-xs font-medium bg-white dark:bg-slate-900 border border-gray-300 dark:border-slate-600 rounded-xl p-2 cursor-pointer"
-                  >
-                    <option value={-1}>-- Kosongkan / Default --</option>
-                    {inspectData.headers.map((h, idx) => (
-                      <option key={idx} value={idx}>
-                        Kolom {idx + 1}: {h}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                {/* 6. Nama Wali */}
-                <div className="p-3 bg-gray-50 dark:bg-slate-800/70 border border-gray-200 dark:border-slate-700 rounded-2xl space-y-1.5">
-                  <div className="flex items-center justify-between text-xs font-bold text-gray-900 dark:text-white">
-                    <span>Nama Orang Tua / Wali</span>
-                    {columnMapping.parentName !== -1 && (
-                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
-                    )}
-                  </div>
-                  <select
-                    value={columnMapping.parentName}
-                    onChange={(e) => handleColumnMappingChange('parentName', Number(e.target.value))}
-                    className="w-full text-xs font-medium bg-white dark:bg-slate-900 border border-gray-300 dark:border-slate-600 rounded-xl p-2 cursor-pointer"
-                  >
-                    <option value={-1}>-- Default: Wali Murid --</option>
-                    {inspectData.headers.map((h, idx) => (
-                      <option key={idx} value={idx}>
-                        Kolom {idx + 1}: {h}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Validation Metrics & Action Summary Bar */}
-          <div className="bg-white dark:bg-slate-900 rounded-[32px] border-2 border-indigo-200 dark:border-slate-800 p-6 shadow-sm space-y-4">
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-3 border-b border-gray-100 dark:border-slate-800">
-              {/* Validation Badges */}
-              <div className="flex flex-wrap items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setFilterTab('all')}
-                  className={`px-3.5 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer ${
-                    filterTab === 'all'
-                      ? 'bg-indigo-600 text-white shadow-xs'
-                      : 'bg-gray-100 dark:bg-slate-800 text-gray-700 dark:text-slate-300 hover:bg-gray-200'
-                  }`}
-                >
-                  Semua ({validationSummary.items.length})
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setFilterTab('valid')}
-                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-                    filterTab === 'valid'
-                      ? 'bg-emerald-600 text-white shadow-xs'
-                      : 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 hover:bg-emerald-100'
-                  }`}
-                >
-                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
-                  <span>{validationSummary.validCount} Sempurna</span>
-                </button>
-
+              {warningCount > 0 && (
                 <button
                   type="button"
                   onClick={() => setFilterTab('warning')}
-                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                  className={`px-3 py-1.5 rounded-xl text-xs font-black transition cursor-pointer ${
                     filterTab === 'warning'
-                      ? 'bg-amber-600 text-white shadow-xs'
-                      : 'bg-amber-50 dark:bg-amber-950/40 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800 hover:bg-amber-100'
+                      ? 'bg-amber-600 text-white'
+                      : 'bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300'
                   }`}
                 >
-                  <AlertTriangle className="w-3.5 h-3.5 text-amber-500" />
-                  <span>{validationSummary.warningCount} Peringatan</span>
+                  Peringatan ({warningCount})
                 </button>
+              )}
 
+              {errorCount > 0 && (
                 <button
                   type="button"
                   onClick={() => setFilterTab('error')}
-                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                  className={`px-3 py-1.5 rounded-xl text-xs font-black transition cursor-pointer ${
                     filterTab === 'error'
-                      ? 'bg-rose-600 text-white shadow-xs'
-                      : 'bg-rose-50 dark:bg-rose-950/40 text-rose-800 dark:text-rose-300 border border-rose-200 dark:border-rose-800 hover:bg-rose-100'
+                      ? 'bg-rose-600 text-white'
+                      : 'bg-rose-50 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300'
                   }`}
                 >
-                  <AlertCircle className="w-3.5 h-3.5 text-rose-500" />
-                  <span>{validationSummary.errorCount} Kesalahan</span>
+                  Kesalahan ({errorCount})
                 </button>
-              </div>
+              )}
+            </div>
+          </div>
 
-              {/* Commit Action */}
-              <div className="flex flex-wrap items-center gap-3">
-                {validationSummary.errorCount > 0 && (
-                  <label className="flex items-center gap-2 text-xs font-bold text-gray-700 dark:text-slate-300 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={skipErrors}
-                      onChange={(e) => setSkipErrors(e.target.checked)}
-                      className="rounded text-indigo-600 focus:ring-indigo-500 cursor-pointer"
-                    />
-                    <span>Abaikan baris kesalahan (impor {validationSummary.studentsToImport.length} siswa valid)</span>
-                  </label>
-                )}
+          {/* Table of Validated Scores */}
+          <div className="bg-white dark:bg-slate-900 rounded-[32px] border-2 border-slate-200 dark:border-slate-800 p-6 shadow-sm space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <h4 className="font-black text-slate-900 dark:text-white text-sm flex items-center gap-2">
+                <Calculator className="w-4 h-4 text-blue-600" />
+                <span>Pratinjau Nilai Rapor Hasil Analisis</span>
+              </h4>
 
-                <button
-                  type="button"
-                  id="btn-commit-smart-import"
-                  onClick={handleCommitImport}
-                  disabled={validationSummary.studentsToImport.length === 0}
-                  className="inline-flex items-center gap-2 px-6 py-2.5 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs sm:text-sm shadow-md shadow-emerald-600/25 transition-all hover:scale-[1.02] active:scale-95 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  <CheckCircle2 className="w-4 h-4 text-emerald-200" />
-                  <span>
-                    Simpan & Impor {validationSummary.studentsToImport.length} Siswa ke {activeClassLevel}
-                  </span>
-                </button>
+              <div className="relative">
+                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  placeholder="Cari nama / mapel..."
+                  value={searchTableQuery}
+                  onChange={(e) => setSearchTableQuery(e.target.value)}
+                  className="pl-8 pr-3 py-1.5 rounded-xl text-xs bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-blue-500 w-full sm:w-48"
+                />
               </div>
             </div>
 
-            {/* Validation Table Preview */}
-            <div className="max-h-[380px] overflow-y-auto border border-gray-200 dark:border-slate-700 rounded-2xl">
-              <table className="w-full text-xs text-left">
-                <thead className="bg-gray-100 dark:bg-slate-800 text-gray-700 dark:text-slate-300 font-bold sticky top-0 z-10 shadow-xs">
+            <div className="border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden max-h-[450px] overflow-y-auto">
+              <table className="w-full text-left text-xs border-collapse">
+                <thead className="bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-bold sticky top-0 z-10">
                   <tr>
-                    <th className="p-3 w-16">Baris</th>
-                    <th className="p-3 w-28">Status</th>
-                    <th className="p-3">NISN</th>
-                    <th className="p-3">Nama Siswa</th>
-                    <th className="p-3 w-16">L/P</th>
-                    <th className="p-3">No WhatsApp Ortu</th>
-                    <th className="p-3">Catatan Validasi</th>
+                    <th className="p-2.5 pl-4">No</th>
+                    <th className="p-2.5">Nama Siswa</th>
+                    <th className="p-2.5">Mata Pelajaran</th>
+                    <th className="p-2.5 text-center">Rata LM</th>
+                    <th className="p-2.5 text-center">Nilai SAS</th>
+                    <th className="p-2.5 text-center">Nilai Akhir</th>
+                    <th className="p-2.5 text-center">Predikat</th>
+                    <th className="p-2.5">Narasi Capaian</th>
+                    <th className="p-2.5 pr-4 text-center">Status</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-gray-100 dark:divide-slate-800 text-gray-900 dark:text-slate-200">
-                  {filteredValidationItems.map((item) => {
-                    const isError = item.status === 'error';
-                    const isWarning = item.status === 'warning';
-                    return (
-                      <tr
-                        key={item.rowNumber}
-                        className={`transition-colors ${
-                          isError
-                            ? 'bg-rose-50/70 dark:bg-rose-950/40 text-rose-900 dark:text-rose-200'
-                            : isWarning
-                            ? 'bg-amber-50/50 dark:bg-amber-950/20'
-                            : 'hover:bg-gray-50 dark:hover:bg-slate-800/50'
-                        }`}
-                      >
-                        <td className="p-3 font-mono font-bold text-gray-500 dark:text-slate-400">
-                          #{item.rowNumber}
-                        </td>
-                        <td className="p-3">
-                          {isError ? (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-black bg-rose-200 dark:bg-rose-900/80 text-rose-800 dark:text-rose-200">
-                              <AlertCircle className="w-3 h-3" />
-                              <span>Error</span>
-                            </span>
-                          ) : isWarning ? (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-black bg-amber-200 dark:bg-amber-900/80 text-amber-800 dark:text-amber-200">
-                              <AlertTriangle className="w-3 h-3" />
-                              <span>Peringatan</span>
-                            </span>
-                          ) : (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-black bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300">
-                              <CheckCircle2 className="w-3 h-3" />
-                              <span>Valid</span>
-                            </span>
-                          )}
-                        </td>
-                        <td className="p-3 font-mono font-bold text-indigo-600 dark:text-indigo-400">
-                          {item.student.nisn}
-                        </td>
-                        <td className="p-3 font-bold">
-                          {item.student.name}
-                        </td>
-                        <td className="p-3 font-mono font-bold">
-                          {item.student.gender}
-                        </td>
-                        <td className="p-3 font-mono text-gray-600 dark:text-slate-300">
-                          {item.student.parentPhone}
-                        </td>
-                        <td className="p-3">
-                          {item.messages.length > 0 ? (
-                            <div className="space-y-0.5">
-                              {item.messages.map((msg, mIdx) => (
-                                <p
-                                  key={mIdx}
-                                  className={`text-[11px] font-medium leading-tight ${
-                                    isError ? 'text-rose-700 dark:text-rose-300' : 'text-amber-700 dark:text-amber-300'
-                                  }`}
-                                >
-                                  • {msg}
-                                </p>
-                              ))}
-                            </div>
-                          ) : (
-                            <span className="text-[11px] text-emerald-600 dark:text-emerald-400 font-medium">
-                              Data sesuai standar
-                            </span>
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })}
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                  {filteredItems.map((item, idx) => (
+                    <tr
+                      key={`${item.studentId}-${item.subjectId}-${idx}`}
+                      className={`hover:bg-slate-50 dark:hover:bg-slate-800/50 ${
+                        item.status === 'error' ? 'bg-rose-50/30 dark:bg-rose-950/20' : ''
+                      }`}
+                    >
+                      <td className="p-2.5 pl-4 text-slate-400 font-mono text-[11px]">{idx + 1}</td>
+                      <td className="p-2.5 font-bold text-slate-900 dark:text-slate-100">
+                        <div>{item.studentName}</div>
+                        <div className="text-[10px] text-slate-400 font-mono">NISN: {item.nisn}</div>
+                      </td>
+                      <td className="p-2.5 font-semibold text-slate-700 dark:text-slate-300">
+                        {item.subjectName}
+                      </td>
+                      <td className="p-2.5 text-center font-mono font-bold text-slate-800 dark:text-slate-200">
+                        {item.rataRataLM}
+                      </td>
+                      <td className="p-2.5 text-center font-mono font-bold text-slate-800 dark:text-slate-200">
+                        {item.sumatifSAS}
+                      </td>
+                      <td className="p-2.5 text-center font-mono font-black text-blue-600 dark:text-blue-400 text-sm">
+                        {item.nilaiAkhir}
+                      </td>
+                      <td className="p-2.5 text-center whitespace-nowrap">
+                        <span
+                          className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${
+                            item.predikat === 'Sangat Baik'
+                              ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
+                              : item.predikat === 'Baik'
+                              ? 'bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300'
+                              : 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300'
+                          }`}
+                        >
+                          {item.predikat}
+                        </span>
+                      </td>
+                      <td className="p-2.5 text-slate-600 dark:text-slate-400 max-w-xs truncate text-[11px]">
+                        {item.narasiRapor}
+                      </td>
+                      <td className="p-2.5 pr-4 text-center whitespace-nowrap">
+                        {item.status === 'valid' ? (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
+                            <Check className="w-3 h-3" /> Valid
+                          </span>
+                        ) : item.status === 'warning' ? (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300">
+                            <AlertCircle className="w-3 h-3" /> Peringatan
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300" title={item.messages.join('; ')}>
+                            <AlertTriangle className="w-3 h-3" /> Siswa Belum Ada
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
                 </tbody>
               </table>
+            </div>
+
+            {/* Commit & Cancel Actions */}
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-3 border-t border-slate-100 dark:border-slate-800">
+              <button
+                type="button"
+                onClick={() => {
+                  setRawRows([]);
+                  setValidationItems([]);
+                }}
+                className="px-4 py-2.5 rounded-xl text-xs font-bold text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
+              >
+                Batal / Unggah Ulang Berkas Lain
+              </button>
+
+              <button
+                type="button"
+                onClick={handleCommitGrades}
+                disabled={validCount + warningCount === 0}
+                className="inline-flex items-center gap-2 px-6 py-3 rounded-2xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-black text-xs sm:text-sm shadow-lg shadow-blue-600/25 transition-all hover:scale-[1.02] cursor-pointer disabled:opacity-50"
+              >
+                <Check className="w-4 h-4" />
+                <span>
+                  Terapkan & Simpan {validCount + warningCount} Nilai ke Buku Nilai e-Rapor
+                </span>
+              </button>
             </div>
           </div>
         </div>

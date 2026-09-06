@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   Student,
   RaporSiswaDetail,
@@ -26,6 +26,7 @@ import {
   UserPlus,
   Trash2,
   Users,
+  Search,
 } from 'lucide-react';
 import {
   fetchOgomojoloAttendanceRecords,
@@ -33,6 +34,7 @@ import {
   syncOgomojoloToRaporDetails,
   convertOgomojoloToStudents,
   syncAllOgomojoloData,
+  parseGradeLevel,
   OGOMOJOLO_COLLECTION_NAME,
 } from '../utils/firebase';
 
@@ -67,6 +69,91 @@ export const OgomojoloSyncModal: React.FC<OgomojoloSyncModalProps> = ({
   const [copiedPrompt, setCopiedPrompt] = useState<boolean>(false);
   const [statusMessage, setStatusMessage] = useState<{ text: string; type: 'success' | 'info' | 'error' } | null>(null);
   const [showClearConfirm, setShowClearConfirm] = useState<boolean>(false);
+  const [selectedSyncScope, setSelectedSyncScope] = useState<ClassLevel | 'Semua Kelas'>('Semua Kelas');
+  const [searchQuery, setSearchQuery] = useState<string>('');
+
+  const classTabs: Array<{ id: ClassLevel | 'Semua Kelas'; label: string }> = [
+    { id: 'Semua Kelas', label: 'Semua Kelas' },
+    { id: 'Kelas 1', label: 'Kelas 1' },
+    { id: 'Kelas 2', label: 'Kelas 2' },
+    { id: 'Kelas 3', label: 'Kelas 3' },
+    { id: 'Kelas 4', label: 'Kelas 4' },
+    { id: 'Kelas 5', label: 'Kelas 5' },
+    { id: 'Kelas 6', label: 'Kelas 6' },
+  ];
+
+  // Cloud records count per class
+  const classCounts = useMemo(() => {
+    const counts: Record<string, number> = {
+      'Semua Kelas': records.length,
+      'Kelas 1': 0,
+      'Kelas 2': 0,
+      'Kelas 3': 0,
+      'Kelas 4': 0,
+      'Kelas 5': 0,
+      'Kelas 6': 0,
+    };
+    records.forEach((r) => {
+      const gl = parseGradeLevel(r.kelas);
+      counts[gl] = (counts[gl] || 0) + 1;
+    });
+    return counts;
+  }, [records]);
+
+  // Existing local students count per class
+  const localClassCounts = useMemo(() => {
+    const counts: Record<string, number> = {
+      'Semua Kelas': students.length,
+      'Kelas 1': 0,
+      'Kelas 2': 0,
+      'Kelas 3': 0,
+      'Kelas 4': 0,
+      'Kelas 5': 0,
+      'Kelas 6': 0,
+    };
+    students.forEach((s) => {
+      if (s.gradeLevel && counts[s.gradeLevel] !== undefined) {
+        counts[s.gradeLevel]++;
+      }
+    });
+    return counts;
+  }, [students]);
+
+  // Filtered records by selected scope and search query
+  const filteredRecords = useMemo(() => {
+    return records.filter((r) => {
+      if (selectedSyncScope !== 'Semua Kelas') {
+        const gl = parseGradeLevel(r.kelas);
+        if (gl !== selectedSyncScope) return false;
+      }
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase();
+        const matchName = r.namaSiswa?.toLowerCase().includes(q);
+        const matchNisn = r.nisn?.toLowerCase().includes(q);
+        const matchNis = r.nis?.toLowerCase().includes(q);
+        return matchName || matchNisn || matchNis;
+      }
+      return true;
+    });
+  }, [records, selectedSyncScope, searchQuery]);
+
+  // Matching analysis for filtered records
+  const matchingStats = useMemo(() => {
+    return filteredRecords.reduce(
+      (acc, r) => {
+        const match = students.some(
+          (s) =>
+            (s.nisn && s.nisn.trim() === r.nisn.trim()) ||
+            (s.nis && r.nis && s.nis.trim() === r.nis.trim()) ||
+            s.name.trim().toLowerCase() === r.namaSiswa.trim().toLowerCase()
+        );
+        if (match) acc.matched++;
+        else acc.unmatched++;
+        return acc;
+      },
+      { matched: 0, unmatched: 0 }
+    );
+  }, [filteredRecords, students]);
 
   const classStudents = students.filter((s) => s.gradeLevel === activeClassLevel);
 
@@ -138,7 +225,7 @@ Pada aplikasi SDK Ogomojolo ini, buatkan tombol "Kirim Data Siswa & Rekap ke e-R
   }, [isOpen]);
 
   // Primary Action: Synchronize ALL student profile data AND attendance data to e-Rapor
-  const handleSyncAllStudentsAndAttendance = () => {
+  const handleSyncAllStudentsAndAttendance = (targetScope: ClassLevel | 'Semua Kelas' = selectedSyncScope) => {
     if (records.length === 0) {
       setStatusMessage({ text: 'Tidak ada data siswa atau kehadiran yang dapat disinkronkan.', type: 'error' });
       return;
@@ -152,11 +239,11 @@ Pada aplikasi SDK Ogomojolo ini, buatkan tombol "Kirim Data Siswa & Rekap ke e-R
       newStudentsCount,
       totalCount,
       syncedStudentNames,
-    } = syncAllOgomojoloData(records, students, raporDetails, activeClassLevel);
+    } = syncAllOgomojoloData(records, students, raporDetails, targetScope);
 
     if (totalCount === 0) {
       setStatusMessage({
-        text: `Tidak ditemukan data siswa untuk ${activeClassLevel} di koleksi Ogomojolo.`,
+        text: `Tidak ditemukan data siswa untuk ${targetScope} di koleksi Ogomojolo.`,
         type: 'error',
       });
       return;
@@ -174,9 +261,10 @@ Pada aplikasi SDK Ogomojolo ini, buatkan tombol "Kirim Data Siswa & Rekap ke e-R
     }
 
     const namesSample = syncedStudentNames.slice(0, 3).join(', ') + (syncedStudentNames.length > 3 ? ` dan ${syncedStudentNames.length - 3} lainnya` : '');
+    const scopeLabel = targetScope === 'Semua Kelas' ? 'Semua Kelas (Kelas 1 - 6)' : targetScope;
 
     setStatusMessage({
-      text: `Alhamdulillah! Berhasil menyalin ${totalCount} data siswa lengkap (${newStudentsCount} siswa baru ditambahkan ke Data Siswa, ${updatedExistingCount} profil siswa & kehadiran diselaraskan) untuk: ${namesSample}.`,
+      text: `Alhamdulillah! Berhasil menyalin ${totalCount} data siswa lengkap untuk ${scopeLabel} (${newStudentsCount} siswa baru ditambahkan ke Data Siswa, ${updatedExistingCount} profil siswa & kehadiran diselaraskan). Contoh: ${namesSample}.`,
       type: 'success',
     });
   };
@@ -192,12 +280,12 @@ Pada aplikasi SDK Ogomojolo ini, buatkan tombol "Kirim Data Siswa & Rekap ke e-R
       records,
       students,
       raporDetails,
-      activeClassLevel
+      selectedSyncScope === 'Semua Kelas' ? undefined : selectedSyncScope
     );
 
     if (matchedCount === 0) {
       setStatusMessage({
-        text: `Tidak ada siswa yang cocok dengan NISN/Nama di ${activeClassLevel}. Klik tombol "Salin Semua Data Siswa & Absensi" untuk menyalin siswa baru secara otomatis.`,
+        text: `Tidak ada siswa yang cocok dengan NISN/Nama di ${selectedSyncScope}. Klik tombol "Salin Semua Data Siswa & Absensi" untuk menyalin siswa baru secara otomatis.`,
         type: 'error',
       });
       return;
@@ -360,19 +448,6 @@ Pada aplikasi SDK Ogomojolo ini, buatkan tombol "Kirim Data Siswa & Rekap ke e-R
   };
 
   if (!isOpen) return null;
-
-  // Analysis of matching
-  const matchingStats = records.reduce(
-    (acc, r) => {
-      const match = classStudents.some(
-        (s) => (s.nisn && s.nisn.trim() === r.nisn.trim()) || s.name.trim().toLowerCase() === r.namaSiswa.trim().toLowerCase()
-      );
-      if (match) acc.matched++;
-      else acc.unmatched++;
-      return acc;
-    },
-    { matched: 0, unmatched: 0 }
-  );
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-slate-950/70 backdrop-blur-xs animate-fadeIn overflow-y-auto">
@@ -561,7 +636,7 @@ Pada aplikasi SDK Ogomojolo ini, buatkan tombol "Kirim Data Siswa & Rekap ke e-R
                 className="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-bold text-xs transition cursor-pointer"
               >
                 <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin text-indigo-600' : ''}`} />
-                <span>Muat Ulang</span>
+                <span>Muat Ulang Data</span>
               </button>
 
               <button
@@ -572,11 +647,11 @@ Pada aplikasi SDK Ogomojolo ini, buatkan tombol "Kirim Data Siswa & Rekap ke e-R
                 className="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl bg-amber-50 dark:bg-amber-950/60 hover:bg-amber-100 dark:hover:bg-amber-900/80 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800 font-bold text-xs transition cursor-pointer"
               >
                 <UploadCloud className="w-3.5 h-3.5 text-amber-600" />
-                <span>{isSimulating ? 'Mengunggah...' : 'Kirim Contoh Profil & Absensi (Simulasi)'}</span>
+                <span>{isSimulating ? 'Mengunggah...' : 'Kirim Data Simulasi'}</span>
               </button>
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               {/* Secondary option: only update attendance */}
               {matchingStats.matched > 0 && (
                 <button
@@ -590,40 +665,109 @@ Pada aplikasi SDK Ogomojolo ini, buatkan tombol "Kirim Data Siswa & Rekap ke e-R
                 </button>
               )}
 
-              {/* PRIMARY PROMINENT ACTION: Salin Semua Data Siswa & Absensi */}
+              {/* Class-specific sync button when a single class tab is selected */}
+              {selectedSyncScope !== 'Semua Kelas' && (
+                <button
+                  type="button"
+                  onClick={() => handleSyncAllStudentsAndAttendance(selectedSyncScope)}
+                  disabled={filteredRecords.length === 0}
+                  className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-2xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-bold text-xs shadow-md transition-all hover:scale-[1.02] cursor-pointer"
+                >
+                  <Users className="w-4 h-4" />
+                  <span>Salin {selectedSyncScope} ({filteredRecords.length} Siswa)</span>
+                </button>
+              )}
+
+              {/* PRIMARY PROMINENT ACTION: Salin SEMUA KELAS (132 Siswa) Sekaligus */}
               <button
                 type="button"
-                onClick={handleSyncAllStudentsAndAttendance}
+                onClick={() => handleSyncAllStudentsAndAttendance('Semua Kelas')}
                 disabled={records.length === 0}
                 className="inline-flex items-center gap-2 px-5 py-2.5 rounded-2xl bg-gradient-to-r from-emerald-600 via-teal-600 to-indigo-600 hover:from-emerald-700 hover:to-indigo-700 disabled:opacity-50 text-white font-black text-xs sm:text-sm shadow-lg shadow-emerald-600/25 transition-all hover:scale-[1.02] cursor-pointer"
               >
                 <Users className="w-4 h-4" />
-                <span>Salin Semua Data Siswa & Absensi ke e-Rapor ({records.length} Siswa)</span>
+                <span>Salin Seluruh Siswa Semua Kelas (1-6) Sekaligus ({records.length} Siswa)</span>
               </button>
             </div>
           </div>
 
-          {/* Preview Table of Ogomojolo Attendance in Cloud */}
-          <div className="space-y-2 pt-2">
-            <div className="flex items-center justify-between text-xs">
-              <span className="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
-                <Users className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
-                <span>Data Siswa & Absensi Terbaca di Koleksi '{OGOMOJOLO_COLLECTION_NAME}' ({records.length} data):</span>
+          {/* Class Filter Tabs & Search Bar */}
+          <div className="space-y-3 pt-2">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+              {/* Class Tabs */}
+              <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
+                {classTabs.map((tab) => {
+                  const isSelected = selectedSyncScope === tab.id;
+                  const count = classCounts[tab.id] || 0;
+                  return (
+                    <button
+                      key={tab.id}
+                      type="button"
+                      onClick={() => setSelectedSyncScope(tab.id)}
+                      className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer whitespace-nowrap ${
+                        isSelected
+                          ? 'bg-indigo-600 text-white shadow-xs font-black'
+                          : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
+                      }`}
+                    >
+                      <span>{tab.label}</span>
+                      <span
+                        className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono font-black ${
+                          isSelected
+                            ? 'bg-white/25 text-white'
+                            : 'bg-indigo-100 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300'
+                        }`}
+                      >
+                        {count}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Search Bar */}
+              <div className="relative shrink-0">
+                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <input
+                  type="text"
+                  placeholder="Cari nama / NISN..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="pl-8 pr-6 py-1.5 rounded-xl text-xs bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-indigo-500 w-full sm:w-48 transition"
+                />
+                {searchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => setSearchQuery('')}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Sub-header info */}
+            <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400">
+              <span>
+                Menampilkan: <strong>{filteredRecords.length} data siswa</strong> untuk filter <strong>{selectedSyncScope}</strong>
               </span>
-              <span className="text-slate-500 dark:text-slate-400">
-                Siswa terdaftar di {activeClassLevel}: <strong>{classStudents.length}</strong> siswa
+              <span>
+                Sudah ada di e-Rapor: <strong>{matchingStats.matched}</strong> • Siswa baru akan disalin: <strong>{filteredRecords.length - matchingStats.matched}</strong>
               </span>
             </div>
 
-            <div className="border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden">
+            {/* Preview Table of Ogomojolo Attendance in Cloud */}
+            <div className="border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden shadow-xs">
               <div className="max-h-72 overflow-y-auto">
                 <table className="w-full text-left text-xs border-collapse">
-                  <thead className="bg-slate-100 dark:bg-slate-800/80 text-slate-700 dark:text-slate-300 font-bold sticky top-0 border-b border-slate-200 dark:border-slate-700">
+                  <thead className="bg-slate-100 dark:bg-slate-800/90 text-slate-700 dark:text-slate-300 font-bold sticky top-0 border-b border-slate-200 dark:border-slate-700 z-10">
                     <tr>
-                      <th className="p-2.5 pl-4">NISN / NIS</th>
+                      <th className="p-2.5 pl-4">No</th>
+                      <th className="p-2.5">NISN / NIS</th>
                       <th className="p-2.5">Nama Siswa & JK</th>
-                      <th className="p-2.5">Kelas</th>
-                      <th className="p-2.5">Kontak & Alamat</th>
+                      <th className="p-2.5">Kelas Terbaca</th>
+                      <th className="p-2.5">Orang Tua & Alamat</th>
                       <th className="p-2.5 text-center">Sakit</th>
                       <th className="p-2.5 text-center">Izin</th>
                       <th className="p-2.5 text-center">Alpa</th>
@@ -631,36 +775,43 @@ Pada aplikasi SDK Ogomojolo ini, buatkan tombol "Kirim Data Siswa & Rekap ke e-R
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                    {records.length === 0 ? (
+                    {filteredRecords.length === 0 ? (
                       <tr>
-                        <td colSpan={8} className="p-8 text-center text-slate-400">
+                        <td colSpan={9} className="p-8 text-center text-slate-400">
                           <Layers className="w-8 h-8 mx-auto text-slate-300 dark:text-slate-600 mb-2" />
-                          <p className="font-bold text-slate-600 dark:text-slate-400">Koleksi masih kosong</p>
-                          <p className="text-[11px] text-slate-400 mt-1">
-                            Gunakan tombol <strong>"Kirim Contoh Profil & Absensi (Simulasi)"</strong> di atas untuk mencoba, atau minta AI di SDK Ogomojolo mengirimkan seluruh data siswa.
+                          <p className="font-bold text-slate-600 dark:text-slate-400">
+                            Tidak ada data siswa untuk filter "{selectedSyncScope}"
                           </p>
+                          {searchQuery && (
+                            <p className="text-[11px] text-slate-400 mt-1">
+                              Coba kosongkan kata pencarian "{searchQuery}"
+                            </p>
+                          )}
                         </td>
                       </tr>
                     ) : (
-                      records.map((r, i) => {
-                        const existingStudent = classStudents.find(
+                      filteredRecords.map((r, i) => {
+                        const existingStudent = students.find(
                           (s) =>
                             (s.nisn && s.nisn.trim() === r.nisn.trim()) ||
                             (s.nis && r.nis && s.nis.trim() === r.nis.trim()) ||
                             s.name.trim().toLowerCase() === r.namaSiswa.trim().toLowerCase()
                         );
                         const isMatch = Boolean(existingStudent);
-                        const genderLabel = r.gender === 'P' || r.jenisKelamin === 'P' ? 'Perempuan' : 'Laki-laki';
+                        const resolvedGrade = parseGradeLevel(r.kelas);
                         const genderShort = r.gender === 'P' || r.jenisKelamin === 'P' ? 'P' : 'L';
 
                         return (
                           <tr
-                            key={r.id || i}
+                            key={r.id || `${r.nisn}-${i}`}
                             className={`hover:bg-slate-50 dark:hover:bg-slate-800/50 transition ${
                               isMatch ? 'bg-emerald-50/30 dark:bg-emerald-950/10' : ''
                             }`}
                           >
-                            <td className="p-2.5 pl-4 font-mono font-semibold text-slate-900 dark:text-slate-100">
+                            <td className="p-2.5 pl-4 text-slate-400 font-mono text-[11px]">
+                              {i + 1}
+                            </td>
+                            <td className="p-2.5 font-mono font-semibold text-slate-900 dark:text-slate-100">
                               <div>{r.nisn || '-'}</div>
                               {r.nis && <div className="text-[10px] text-slate-400 font-sans">NIS: {r.nis}</div>}
                             </td>
@@ -674,8 +825,10 @@ Pada aplikasi SDK Ogomojolo ini, buatkan tombol "Kirim Data Siswa & Rekap ke e-R
                                 </span>
                               </div>
                             </td>
-                            <td className="p-2.5 text-slate-600 dark:text-slate-400 whitespace-nowrap">
-                              {r.kelas || activeClassLevel}
+                            <td className="p-2.5 whitespace-nowrap">
+                              <span className="px-2 py-0.5 rounded-lg text-[10px] font-bold bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800">
+                                {resolvedGrade}
+                              </span>
                             </td>
                             <td className="p-2.5 text-slate-600 dark:text-slate-400 max-w-[160px] truncate text-[11px]">
                               <div>{r.parentName || r.namaOrtu || '-'}</div>
@@ -694,7 +847,7 @@ Pada aplikasi SDK Ogomojolo ini, buatkan tombol "Kirim Data Siswa & Rekap ke e-R
                               {isMatch ? (
                                 <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-black bg-emerald-100 dark:bg-emerald-900/60 text-emerald-800 dark:text-emerald-200 border border-emerald-300 dark:border-emerald-800">
                                   <Check className="w-3 h-3 text-emerald-600" />
-                                  Profil & Absensi Diperbarui
+                                  Sudah di e-Rapor
                                 </span>
                               ) : (
                                 <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-black bg-indigo-100 dark:bg-indigo-900/60 text-indigo-800 dark:text-indigo-200 border border-indigo-300 dark:border-indigo-800">

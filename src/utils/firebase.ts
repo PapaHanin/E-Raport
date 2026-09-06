@@ -415,13 +415,45 @@ export function subscribeToOgomojoloAttendance(
 }
 
 /**
+ * Parses any class string into standard ClassLevel ('Kelas 1' .. 'Kelas 6').
+ */
+export function parseGradeLevel(raw?: string): ClassLevel {
+  if (!raw) return 'Kelas 4';
+  const trimmed = raw.trim();
+  const digits = trimmed.replace(/[^0-9]/g, '');
+  if (digits === '1') return 'Kelas 1';
+  if (digits === '2') return 'Kelas 2';
+  if (digits === '3') return 'Kelas 3';
+  if (digits === '4') return 'Kelas 4';
+  if (digits === '5') return 'Kelas 5';
+  if (digits === '6') return 'Kelas 6';
+  
+  const lower = trimmed.toLowerCase();
+  if (lower.includes('vi') || lower.includes('6')) return 'Kelas 6';
+  if (lower.includes('iv') || lower.includes('4')) return 'Kelas 4';
+  if (lower.includes('v') || lower.includes('5')) return 'Kelas 5';
+  if (lower.includes('iii') || lower.includes('3')) return 'Kelas 3';
+  if (lower.includes('ii') || lower.includes('2')) return 'Kelas 2';
+  if (lower.includes('i') || lower.includes('1')) return 'Kelas 1';
+  return 'Kelas 4';
+}
+
+/**
  * Normalizes class strings (e.g. "Kelas 4", "4", "4A", "kelas 4") for resilient matching.
  */
 function normalizeClassKey(c?: string): string {
   if (!c) return '';
+  if (c === 'Semua Kelas' || c.toLowerCase() === 'all') return '';
   const digits = c.replace(/[^0-9]/g, '');
-  if (digits) return `kelas ${digits}`;
-  return c.trim().toLowerCase();
+  if (digits && digits >= '1' && digits <= '6') return `kelas ${digits}`;
+  const lower = c.trim().toLowerCase();
+  if (lower.includes('vi')) return 'kelas 6';
+  if (lower.includes('iv')) return 'kelas 4';
+  if (lower.includes('v')) return 'kelas 5';
+  if (lower.includes('iii')) return 'kelas 3';
+  if (lower.includes('ii')) return 'kelas 2';
+  if (lower.includes('i')) return 'kelas 1';
+  return lower;
 }
 
 /**
@@ -431,12 +463,13 @@ function normalizeClassKey(c?: string): string {
  *
  * - Existing students: profile details are updated and attendance is synchronized.
  * - New students from Ogomojolo: automatically appended to the students list with full profile details.
+ * - If targetClassLevel is 'Semua Kelas' or undefined, syncs ALL classes (1-6) at once!
  */
 export function syncAllOgomojoloData(
   records: OgomojoloAttendanceRecord[],
   currentStudents: Student[],
   currentRaporDetails: Record<string, RaporSiswaDetail>,
-  targetClassLevel?: ClassLevel
+  targetClassLevel?: ClassLevel | 'Semua Kelas'
 ): {
   updatedStudents: Student[];
   updatedRaporDetails: Record<string, RaporSiswaDetail>;
@@ -446,10 +479,12 @@ export function syncAllOgomojoloData(
   totalCount: number;
   syncedStudentNames: string[];
 } {
-  const normTarget = normalizeClassKey(targetClassLevel);
+  const isAllClasses = !targetClassLevel || targetClassLevel === 'Semua Kelas';
+  const normTarget = isAllClasses ? '' : normalizeClassKey(targetClassLevel);
   
-  // Filter records that match target class, or accept all if record has no class specified
+  // Filter records that match target class, or accept all if target is 'Semua Kelas'
   const targetRecords = records.filter((r) => {
+    if (isAllClasses) return true;
     if (!r.kelas || !r.kelas.trim()) return true;
     if (!normTarget) return true;
     const normRecord = normalizeClassKey(r.kelas);
@@ -467,6 +502,12 @@ export function syncAllOgomojoloData(
     const cleanRecordNisn = (record.nisn || '').trim();
     const cleanRecordNis = (record.nis || '').trim();
     const cleanRecordName = (record.namaSiswa || '').trim().toLowerCase();
+
+    // Determine the accurate class for this record
+    const recordGradeLevel = parseGradeLevel(record.kelas || (!isAllClasses ? targetClassLevel : 'Kelas 4'));
+    const resolvedGradeLevel: ClassLevel = isAllClasses
+      ? recordGradeLevel
+      : (targetClassLevel as ClassLevel || recordGradeLevel || 'Kelas 4');
 
     // 1. Check if student already exists in currentStudents
     let studentIndex = -1;
@@ -490,12 +531,13 @@ export function syncAllOgomojoloData(
     if (studentIndex >= 0) {
       // Existing student: UPDATE profile data with data from Ogomojolo
       const existing = updatedStudents[studentIndex];
+      const targetGrade = isAllClasses ? (recordGradeLevel || existing.gradeLevel) : resolvedGradeLevel;
       const updated: Student = {
         ...existing,
         name: record.namaSiswa.trim() || existing.name,
         nisn: cleanRecordNisn || existing.nisn,
         nis: cleanRecordNis || existing.nis || (cleanRecordNisn ? cleanRecordNisn.slice(-4) : existing.nis),
-        gender: record.gender || existing.gender || 'L',
+        gender: record.gender || (record.jenisKelamin?.toUpperCase().startsWith('P') ? 'P' : 'L') || existing.gender || 'L',
         parentName: record.parentName || record.namaOrtu || existing.parentName || 'Orang Tua / Wali Murid',
         parentPhone: record.parentPhone || record.noHp || existing.parentPhone || '081234567890',
         address: record.address || record.alamat || existing.address || 'Alamat Siswa',
@@ -503,8 +545,8 @@ export function syncAllOgomojoloData(
         birthPlace: record.birthPlace || record.tempatLahir || existing.birthPlace,
         nik: record.nik || existing.nik,
         religion: (record.religion || record.agama || existing.religion) as any,
-        gradeLevel: targetClassLevel || existing.gradeLevel,
-        fase: getFaseByClass(targetClassLevel || existing.gradeLevel),
+        gradeLevel: targetGrade,
+        fase: getFaseByClass(targetGrade),
       };
 
       updatedStudents[studentIndex] = updated;
@@ -535,16 +577,15 @@ export function syncAllOgomojoloData(
       const newId = cleanRecordNisn 
         ? `std-${cleanRecordNisn.replace(/[^a-zA-Z0-9]/g, '')}` 
         : `std-og-${Date.now()}-${idx + 1}`;
-      const gradeLevel = targetClassLevel || (record.kelas as ClassLevel) || 'Kelas 4';
 
       const newStudent: Student = {
         id: newId,
         nisn: cleanRecordNisn || `00${idx + 7890123}`,
         nis: cleanRecordNis || (cleanRecordNisn ? cleanRecordNisn.slice(-4) : `240${idx + 1}`),
         name: record.namaSiswa.trim(),
-        gender: record.gender || 'L',
-        gradeLevel: gradeLevel,
-        fase: getFaseByClass(gradeLevel),
+        gender: record.gender || (record.jenisKelamin?.toUpperCase().startsWith('P') ? 'P' : 'L') || 'L',
+        gradeLevel: resolvedGradeLevel,
+        fase: getFaseByClass(resolvedGradeLevel),
         parentName: record.parentName || record.namaOrtu || 'Orang Tua / Wali Murid',
         parentPhone: record.parentPhone || record.noHp || '081234567890',
         address: record.address || record.alamat || 'Alamat Siswa',
@@ -607,8 +648,8 @@ export function syncOgomojoloToRaporDetails(
   const matchedStudentNames: string[] = [];
   const matchedRecordIds = new Set<string>();
 
-  const targetStudents = filterClassLevel
-    ? students.filter((s) => s.gradeLevel === filterClassLevel)
+  const targetStudents = (filterClassLevel && filterClassLevel !== 'Semua Kelas')
+    ? students.filter((s) => s.gradeLevel === filterClassLevel || normalizeClassKey(s.gradeLevel) === normalizeClassKey(filterClassLevel))
     : students;
 
   for (const student of targetStudents) {
@@ -662,14 +703,20 @@ export function syncOgomojoloToRaporDetails(
  */
 export function convertOgomojoloToStudents(
   records: OgomojoloAttendanceRecord[],
-  targetClassLevel?: ClassLevel
+  targetClassLevel?: ClassLevel | 'Semua Kelas'
 ): {
   students: Student[];
   raporDetails: Record<string, RaporSiswaDetail>;
 } {
-  const targetRecords = targetClassLevel
-    ? records.filter((r) => !r.kelas || r.kelas.trim() === targetClassLevel.trim())
-    : records;
+  const isAll = !targetClassLevel || targetClassLevel === 'Semua Kelas';
+  const normTarget = isAll ? '' : normalizeClassKey(targetClassLevel);
+
+  const targetRecords = isAll
+    ? records
+    : records.filter((r) => {
+        if (!r.kelas || !r.kelas.trim()) return true;
+        return normalizeClassKey(r.kelas) === normTarget;
+      });
 
   const students: Student[] = [];
   const raporDetails: Record<string, RaporSiswaDetail> = {};
@@ -677,7 +724,9 @@ export function convertOgomojoloToStudents(
   targetRecords.forEach((r, idx) => {
     const cleanNisn = (r.nisn || '').trim();
     const studentId = cleanNisn ? `std-${cleanNisn.replace(/[^a-zA-Z0-9]/g, '')}` : `std-og-${idx + 1}`;
-    const gradeLevel = (r.kelas as ClassLevel) || targetClassLevel || 'Kelas 4';
+    const gradeLevel = isAll 
+      ? parseGradeLevel(r.kelas) 
+      : (targetClassLevel as ClassLevel || parseGradeLevel(r.kelas) || 'Kelas 4');
 
     students.push({
       id: studentId,
