@@ -977,6 +977,7 @@ export const PengaturanView: React.FC<PengaturanViewProps> = ({
           <PengaturanGuruSection
             teachers={teachers}
             currentUser={currentUser || defaultAdminTeacher}
+            subjects={subjects}
             onUpdateTeachers={onUpdateTeachers}
             onSwitchUser={onSwitchUser}
             onUpdateCurrentTeacherSignature={(name, nip) => {

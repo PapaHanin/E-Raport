@@ -35,6 +35,7 @@ import {
   Users,
   FileSpreadsheet,
   Zap,
+  Lock,
 } from 'lucide-react';
 
 interface WhatsAppGatewayViewProps {
@@ -63,6 +64,9 @@ export const WhatsAppGatewayView: React.FC<WhatsAppGatewayViewProps> = ({
   onUpdateSchoolProfile,
 }) => {
   const classLevels: ClassLevel[] = ['Kelas 1', 'Kelas 2', 'Kelas 3', 'Kelas 4', 'Kelas 5', 'Kelas 6'];
+
+  const isGuruMapel = currentUser?.role === 'guru_mapel';
+  const isWaliKelas = currentUser?.role === 'guru_wali_kelas';
 
   // Filter students for active class
   const classStudents = students.filter(
@@ -379,24 +383,50 @@ _${schoolProfile.schoolName}_`;
               Pilih Kelas:
             </span>
           </div>
-          <div className="flex items-center gap-1.5 bg-gray-100 dark:bg-slate-800 p-1 rounded-2xl overflow-x-auto">
-            {classLevels.map((lvl) => {
-              const isActive = lvl === activeClassLevel;
-              return (
-                <button
-                  key={lvl}
-                  type="button"
-                  onClick={() => onSelectClassLevel(lvl)}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer ${
-                    isActive
-                      ? 'bg-[#4F46E5] text-white shadow-xs scale-[1.02]'
-                      : 'text-gray-700 dark:text-slate-300 hover:text-indigo-700 hover:bg-white/80 dark:hover:bg-slate-700'
-                  }`}
-                >
-                  {lvl}
-                </button>
-              );
-            })}
+          {isWaliKelas ? (
+            <div className="flex items-center gap-1.5 bg-amber-100/90 dark:bg-amber-950/60 border border-amber-300 dark:border-amber-700 text-amber-900 dark:text-amber-200 px-3 py-1.5 rounded-xl text-xs font-black shadow-xs">
+              <Lock className="w-3.5 h-3.5 text-amber-700 dark:text-amber-400 shrink-0" />
+              <span>{currentUser?.assignedClass || activeClassLevel} (Terkunci Khusus Wali Kelas)</span>
+            </div>
+          ) : (
+            <div className="flex items-center gap-1.5 bg-gray-100 dark:bg-slate-800 p-1 rounded-2xl overflow-x-auto">
+              {classLevels.map((lvl) => {
+                const isActive = lvl === activeClassLevel;
+                return (
+                  <button
+                    key={lvl}
+                    type="button"
+                    onClick={() => onSelectClassLevel(lvl)}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer ${
+                      isActive
+                        ? 'bg-[#4F46E5] text-white shadow-xs scale-[1.02]'
+                        : 'text-gray-700 dark:text-slate-300 hover:text-indigo-700 hover:bg-white/80 dark:hover:bg-slate-700'
+                    }`}
+                  >
+                    {lvl}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Informative Banner for Guru Mapel */}
+      {isGuruMapel && (
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 bg-teal-50 dark:bg-teal-950/40 rounded-2xl border-2 border-teal-300 dark:border-teal-700 text-xs shadow-xs animate-fadeIn">
+          <div className="flex items-center gap-2.5">
+            <div className="w-9 h-9 rounded-xl bg-teal-600 text-white flex items-center justify-center font-black shrink-0 shadow-xs">
+              <MessageSquare className="w-5 h-5" />
+            </div>
+            <div>
+              <span className="font-black text-teal-950 dark:text-teal-200 text-xs sm:text-sm">
+                Info Integrasi Nilai WhatsApp Gateway
+              </span>
+              <p className="text-[11px] text-teal-800/90 dark:text-teal-300/90 font-medium mt-0.5">
+                Pengiriman WhatsApp resmi ke wali murid dikelola oleh masing-masing Wali Kelas. Nilai mata pelajaran <strong>{currentUser?.assignedSubjectName || 'khusus Anda'}</strong> yang sudah Anda input otomatis tercantum pada format laporan rapor yang dikirimkan.
+              </p>
+            </div>
           </div>
         </div>
       )}

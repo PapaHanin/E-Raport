@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { TeacherAccount, ClassLevel, UserRole } from '../types';
+import { TeacherAccount, ClassLevel, UserRole, MataPelajaran } from '../types';
 import {
   Users,
   UserPlus,
@@ -30,11 +30,14 @@ import {
   Eye,
   EyeOff,
   Key,
+  BookOpen,
+  Award,
 } from 'lucide-react';
 
 interface PengaturanGuruSectionProps {
   teachers: TeacherAccount[];
   currentUser: TeacherAccount;
+  subjects?: MataPelajaran[];
   onUpdateTeachers: (updatedTeachers: TeacherAccount[]) => void;
   onUpdateCurrentTeacherSignature?: (teacherName: string, teacherNIP: string) => void;
   onSwitchUser?: (user: TeacherAccount) => void;
@@ -43,6 +46,7 @@ interface PengaturanGuruSectionProps {
 export const PengaturanGuruSection: React.FC<PengaturanGuruSectionProps> = ({
   teachers,
   currentUser,
+  subjects = [],
   onUpdateTeachers,
   onUpdateCurrentTeacherSignature,
   onSwitchUser,
@@ -58,13 +62,31 @@ export const PengaturanGuruSection: React.FC<PengaturanGuruSectionProps> = ({
 
   // Search & Filter
   const [searchQuery, setSearchQuery] = useState<string>('');
-  const [roleFilter, setRoleFilter] = useState<'all' | 'admin' | 'guru_wali_kelas'>('all');
+  const [roleFilter, setRoleFilter] = useState<'all' | 'admin' | 'guru_wali_kelas' | 'guru_mapel'>('all');
   const [statusFilter, setStatusFilter] = useState<'all' | 'aktif' | 'nonaktif'>('all');
 
   // Modal Add / Edit
   const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
   const [editingTeacherId, setEditingTeacherId] = useState<string | null>(null);
   const [showPinPassword, setShowPinPassword] = useState<boolean>(false);
+
+  // Default Mapel options
+  const defaultSubjectsList = [
+    { id: 'mapel-1', name: 'Pendidikan Agama Islam dan Budi Pekerti' },
+    { id: 'mapel-7', name: 'Pendidikan Jasmani, Olahraga, dan Kesehatan (PJOK)' },
+    { id: 'mapel-8', name: 'Bahasa Inggris' },
+    { id: 'mapel-2', name: 'Pendidikan Pancasila' },
+    { id: 'mapel-3', name: 'Bahasa Indonesia' },
+    { id: 'mapel-4', name: 'Matematika' },
+    { id: 'mapel-5', name: 'Ilmu Pengetahuan Alam dan Sosial (IPAS)' },
+    { id: 'mapel-6', name: 'Seni Rupa' },
+    { id: 'mapel-mulok', name: 'Muatan Lokal / Bahasa Daerah' },
+  ];
+
+  // Merge with system subjects if available
+  const availableSubjects = subjects && subjects.length > 0 
+    ? subjects.map(s => ({ id: s.id, name: s.name }))
+    : defaultSubjectsList;
 
   // Quick PIN Edit Modal
   const [quickPinTeacher, setQuickPinTeacher] = useState<TeacherAccount | null>(null);
@@ -89,6 +111,8 @@ export const PengaturanGuruSection: React.FC<PengaturanGuruSectionProps> = ({
     pin: string;
     role: UserRole;
     assignedClass?: ClassLevel;
+    assignedSubjectId?: string;
+    assignedSubjectName?: string;
     phone: string;
     status: 'aktif' | 'nonaktif';
   }>({
@@ -99,6 +123,8 @@ export const PengaturanGuruSection: React.FC<PengaturanGuruSectionProps> = ({
     pin: '1234',
     role: 'guru_wali_kelas',
     assignedClass: 'Kelas 1',
+    assignedSubjectId: 'mapel-7',
+    assignedSubjectName: 'Pendidikan Jasmani, Olahraga, dan Kesehatan (PJOK)',
     phone: '',
     status: 'aktif',
   });
@@ -151,14 +177,24 @@ export const PengaturanGuruSection: React.FC<PengaturanGuruSectionProps> = ({
     setEditingTeacherId(null);
     setFormError(null);
     setShowPinPassword(false);
+    
+    let defaultEmail = `guru.k${timestamp.slice(-1)}@sdn01merdekamandiri.sch.id`;
+    if (defaultRole === 'admin') {
+      defaultEmail = `admin.${timestamp}@sdn01merdekamandiri.sch.id`;
+    } else if (defaultRole === 'guru_mapel') {
+      defaultEmail = `guru.pjok.${timestamp}@sdn01merdekamandiri.sch.id`;
+    }
+
     setFormData({
       name: '',
       nip: '',
-      email: defaultRole === 'admin' ? `admin.${timestamp}@sdn01merdekamandiri.sch.id` : `guru.k${timestamp.slice(-1)}@sdn01merdekamandiri.sch.id`,
-      username: defaultRole === 'admin' ? `admin_${timestamp}` : `guru_${timestamp}`,
+      email: defaultEmail,
+      username: defaultRole === 'admin' ? `admin_${timestamp}` : defaultRole === 'guru_mapel' ? `mapel_${timestamp}` : `guru_${timestamp}`,
       pin: '1234',
       role: defaultRole,
-      assignedClass: defaultRole === 'admin' ? undefined : 'Kelas 1',
+      assignedClass: defaultRole === 'guru_wali_kelas' ? 'Kelas 1' : undefined,
+      assignedSubjectId: 'mapel-7',
+      assignedSubjectName: 'Pendidikan Jasmani, Olahraga, dan Kesehatan (PJOK)',
       phone: '',
       status: 'aktif',
     });
@@ -177,6 +213,8 @@ export const PengaturanGuruSection: React.FC<PengaturanGuruSectionProps> = ({
       pin: t.pin || '1234',
       role: t.role,
       assignedClass: t.assignedClass || 'Kelas 1',
+      assignedSubjectId: t.assignedSubjectId || 'mapel-7',
+      assignedSubjectName: t.assignedSubjectName || 'Pendidikan Jasmani, Olahraga, dan Kesehatan (PJOK)',
       phone: t.phone || '',
       status: t.status || 'aktif',
     });
@@ -206,6 +244,11 @@ export const PengaturanGuruSection: React.FC<PengaturanGuruSectionProps> = ({
       return;
     }
 
+    if (formData.role === 'guru_mapel' && !formData.assignedSubjectName?.trim()) {
+      setFormError('Pilih atau tentukan mata pelajaran yang diampu oleh Guru Mapel.');
+      return;
+    }
+
     // Duplicate email check
     const isDuplicateEmail = teachers.some(
       (t) => t.id !== editingTeacherId && t.email.toLowerCase() === cleanEmail
@@ -228,7 +271,10 @@ export const PengaturanGuruSection: React.FC<PengaturanGuruSectionProps> = ({
             username: formData.username.trim() || t.username,
             pin: cleanPin,
             role: formData.role,
-            assignedClass: formData.role === 'admin' ? undefined : formData.assignedClass,
+            assignedClass: formData.role === 'guru_wali_kelas' ? formData.assignedClass : undefined,
+            assignedSubjectId: formData.role === 'guru_mapel' ? formData.assignedSubjectId : undefined,
+            assignedSubjectName: formData.role === 'guru_mapel' ? formData.assignedSubjectName?.trim() : undefined,
+            assignedClasses: formData.role === 'guru_mapel' ? ['Kelas 1', 'Kelas 2', 'Kelas 3', 'Kelas 4', 'Kelas 5', 'Kelas 6'] : undefined,
             phone: formData.phone.trim(),
             status: formData.status,
           };
@@ -245,12 +291,16 @@ export const PengaturanGuruSection: React.FC<PengaturanGuruSectionProps> = ({
         username: formData.username.trim() || `user_${Date.now().toString().slice(-4)}`,
         pin: cleanPin,
         role: formData.role,
-        assignedClass: formData.role === 'admin' ? undefined : formData.assignedClass,
+        assignedClass: formData.role === 'guru_wali_kelas' ? formData.assignedClass : undefined,
+        assignedSubjectId: formData.role === 'guru_mapel' ? formData.assignedSubjectId : undefined,
+        assignedSubjectName: formData.role === 'guru_mapel' ? formData.assignedSubjectName?.trim() : undefined,
+        assignedClasses: formData.role === 'guru_mapel' ? ['Kelas 1', 'Kelas 2', 'Kelas 3', 'Kelas 4', 'Kelas 5', 'Kelas 6'] : undefined,
         phone: formData.phone.trim(),
         status: formData.status,
       };
       updated = [...teachers, newAccount];
-      showNotification(`Akun "${cleanName}" (${formData.role === 'admin' ? 'Admin' : 'Guru'}) berhasil ditambahkan!`);
+      const roleLabel = formData.role === 'admin' ? 'Admin' : formData.role === 'guru_mapel' ? 'Guru Mapel' : 'Guru Wali Kelas';
+      showNotification(`Akun "${cleanName}" (${roleLabel}) berhasil ditambahkan!`);
     }
 
     onUpdateTeachers(updated);
@@ -392,7 +442,8 @@ export const PengaturanGuruSection: React.FC<PengaturanGuruSectionProps> = ({
       t.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       t.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
       (t.nip && t.nip.includes(searchQuery)) ||
-      (t.assignedClass && t.assignedClass.toLowerCase().includes(searchQuery.toLowerCase()));
+      (t.assignedClass && t.assignedClass.toLowerCase().includes(searchQuery.toLowerCase())) ||
+      (t.assignedSubjectName && t.assignedSubjectName.toLowerCase().includes(searchQuery.toLowerCase()));
 
     const matchRole =
       roleFilter === 'all' ? true : t.role === roleFilter;
@@ -405,6 +456,7 @@ export const PengaturanGuruSection: React.FC<PengaturanGuruSectionProps> = ({
 
   const adminAccountsCount = teachers.filter((t) => t.role === 'admin').length;
   const waliKelasCount = teachers.filter((t) => t.role === 'guru_wali_kelas').length;
+  const guruMapelCount = teachers.filter((t) => t.role === 'guru_mapel').length;
 
   return (
     <div className="bg-white dark:bg-slate-900 rounded-[32px] border-2 border-indigo-100 dark:border-slate-800 shadow-xs p-6 sm:p-7 space-y-6 transition-colors duration-200" id="pengaturan-guru-section">
@@ -418,7 +470,7 @@ export const PengaturanGuruSection: React.FC<PengaturanGuruSectionProps> = ({
             </h3>
           </div>
           <p className="text-xs text-gray-500 dark:text-slate-400 font-medium mt-1">
-            Kelola data akun guru wali kelas dan administrator sekolah, atur PIN masuk, tambah guru baru, edit data, dan hapus akun.
+            Kelola data akun guru wali kelas, guru mapel (PJOK/PAI/Inggris), dan administrator sekolah, atur PIN masuk, tambah guru baru, edit data, dan hapus akun.
           </p>
         </div>
 
@@ -431,7 +483,17 @@ export const PengaturanGuruSection: React.FC<PengaturanGuruSectionProps> = ({
             className="inline-flex items-center gap-2 px-3.5 py-2.5 bg-[#4F46E5] hover:bg-indigo-700 text-white rounded-2xl text-xs font-black shadow-md shadow-indigo-500/20 transition-all active:scale-95 shrink-0 cursor-pointer"
           >
             <UserPlus className="w-4 h-4 text-yellow-300" />
-            <span>Tambah Guru Wali Kelas</span>
+            <span>Tambah Wali Kelas</span>
+          </button>
+
+          <button
+            type="button"
+            id="btn-tambah-guru-mapel"
+            onClick={() => handleOpenAdd('guru_mapel')}
+            className="inline-flex items-center gap-2 px-3.5 py-2.5 bg-teal-600 hover:bg-teal-700 text-white rounded-2xl text-xs font-black shadow-md shadow-teal-500/20 transition-all active:scale-95 shrink-0 cursor-pointer"
+          >
+            <BookOpen className="w-4 h-4 text-white" />
+            <span>Tambah Guru Mapel</span>
           </button>
 
           <button
@@ -441,7 +503,7 @@ export const PengaturanGuruSection: React.FC<PengaturanGuruSectionProps> = ({
             className="inline-flex items-center gap-2 px-3.5 py-2.5 bg-amber-500 hover:bg-amber-600 text-white rounded-2xl text-xs font-black shadow-md shadow-amber-500/20 transition-all active:scale-95 shrink-0 cursor-pointer"
           >
             <ShieldCheck className="w-4 h-4 text-white" />
-            <span>Tambah Admin / Kepsek</span>
+            <span>Tambah Admin</span>
           </button>
 
           {teachers.length > 1 && (
@@ -453,7 +515,7 @@ export const PengaturanGuruSection: React.FC<PengaturanGuruSectionProps> = ({
               title="Kosongkan semua guru dan hanya sisakan akun Admin Anda"
             >
               <RotateCcw className="w-3.5 h-3.5 text-rose-600 dark:text-rose-400" />
-              <span>Kosongkan Daftar Guru</span>
+              <span>Kosongkan</span>
             </button>
           )}
         </div>
@@ -603,7 +665,7 @@ export const PengaturanGuruSection: React.FC<PengaturanGuruSectionProps> = ({
           </h4>
 
           {/* Quick Filter Tabs */}
-          <div className="flex items-center gap-1.5 bg-gray-100 dark:bg-slate-800 p-1 rounded-xl text-xs font-bold">
+          <div className="flex items-center gap-1.5 bg-gray-100 dark:bg-slate-800 p-1 rounded-xl text-xs font-bold flex-wrap">
             <button
               type="button"
               onClick={() => setRoleFilter('all')}
@@ -615,21 +677,30 @@ export const PengaturanGuruSection: React.FC<PengaturanGuruSectionProps> = ({
             </button>
             <button
               type="button"
-              onClick={() => setRoleFilter('admin')}
-              className={`px-2.5 py-1 rounded-lg transition-all cursor-pointer ${
-                roleFilter === 'admin' ? 'bg-amber-500 text-white shadow-xs' : 'text-gray-600 dark:text-slate-400 hover:text-gray-900 dark:hover:text-white'
-              }`}
-            >
-              Admin ({adminAccountsCount})
-            </button>
-            <button
-              type="button"
               onClick={() => setRoleFilter('guru_wali_kelas')}
               className={`px-2.5 py-1 rounded-lg transition-all cursor-pointer ${
                 roleFilter === 'guru_wali_kelas' ? 'bg-indigo-600 text-white shadow-xs' : 'text-gray-600 dark:text-slate-400 hover:text-gray-900 dark:hover:text-white'
               }`}
             >
               Wali Kelas ({waliKelasCount})
+            </button>
+            <button
+              type="button"
+              onClick={() => setRoleFilter('guru_mapel')}
+              className={`px-2.5 py-1 rounded-lg transition-all cursor-pointer ${
+                roleFilter === 'guru_mapel' ? 'bg-teal-600 text-white shadow-xs' : 'text-gray-600 dark:text-slate-400 hover:text-gray-900 dark:hover:text-white'
+              }`}
+            >
+              Guru Mapel ({guruMapelCount})
+            </button>
+            <button
+              type="button"
+              onClick={() => setRoleFilter('admin')}
+              className={`px-2.5 py-1 rounded-lg transition-all cursor-pointer ${
+                roleFilter === 'admin' ? 'bg-amber-500 text-white shadow-xs' : 'text-gray-600 dark:text-slate-400 hover:text-gray-900 dark:hover:text-white'
+              }`}
+            >
+              Admin ({adminAccountsCount})
             </button>
           </div>
         </div>
@@ -642,7 +713,7 @@ export const PengaturanGuruSection: React.FC<PengaturanGuruSectionProps> = ({
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Cari berdasarkan nama guru, email, NIP, PIN, atau kelas..."
+              placeholder="Cari berdasarkan nama guru, email, NIP, PIN, mapel, atau kelas..."
               className="w-full pl-9 pr-4 py-2 bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-xl text-xs font-medium text-gray-800 dark:text-slate-200 focus:bg-white dark:focus:bg-slate-900 focus:ring-2 focus:ring-indigo-500"
             />
           </div>
@@ -677,7 +748,7 @@ export const PengaturanGuruSection: React.FC<PengaturanGuruSectionProps> = ({
                 <th className="p-3.5">Nama & NIP Guru</th>
                 <th className="p-3.5">Email Terdaftar (Login)</th>
                 <th className="p-3.5">Peran / Role</th>
-                <th className="p-3.5">Kelas Diampu</th>
+                <th className="p-3.5">Akses Kelas & Tugas</th>
                 <th className="p-3.5">PIN Masuk</th>
                 <th className="p-3.5 text-center">Status</th>
                 <th className="p-3.5 text-center">Aksi (Edit / Hapus)</th>
@@ -688,8 +759,8 @@ export const PengaturanGuruSection: React.FC<PengaturanGuruSectionProps> = ({
                 <tr>
                   <td colSpan={7} className="p-8 text-center text-gray-400 dark:text-slate-500">
                     <Users className="w-8 h-8 mx-auto mb-2 opacity-40" />
-                    <p className="font-bold">Belum ada akun guru wali kelas terdaftar.</p>
-                    <p className="text-xs mt-1">Silakan gunakan tombol "Tambah Guru Wali Kelas" untuk menambahkan akun guru Anda.</p>
+                    <p className="font-bold">Belum ada akun guru terdaftar.</p>
+                    <p className="text-xs mt-1">Silakan gunakan tombol "Tambah Wali Kelas" atau "Tambah Guru Mapel" untuk membuat akun baru.</p>
                   </td>
                 </tr>
               ) : (
@@ -712,10 +783,24 @@ export const PengaturanGuruSection: React.FC<PengaturanGuruSectionProps> = ({
                         <div className="flex items-center gap-2.5">
                           <div
                             className={`w-8 h-8 rounded-xl flex items-center justify-center font-black text-xs text-white shrink-0 ${
-                              t.role === 'admin' ? 'bg-amber-500 shadow-xs' : 'bg-indigo-600 shadow-xs'
+                              t.role === 'admin'
+                                ? 'bg-amber-500 shadow-xs'
+                                : t.role === 'guru_mapel'
+                                ? 'bg-teal-600 shadow-xs'
+                                : 'bg-indigo-600 shadow-xs'
                             }`}
                           >
-                            {t.role === 'admin' ? 'ADM' : t.assignedClass?.replace('Kelas ', 'K') || 'GK'}
+                            {t.role === 'admin'
+                              ? 'ADM'
+                              : t.role === 'guru_mapel'
+                              ? t.assignedSubjectName?.includes('PJOK')
+                                ? 'PJK'
+                                : t.assignedSubjectName?.includes('Agama')
+                                ? 'PAI'
+                                : t.assignedSubjectName?.includes('Inggris')
+                                ? 'ENG'
+                                : 'GMP'
+                              : t.assignedClass?.replace('Kelas ', 'K') || 'GK'}
                           </div>
                           <div>
                             <div className="flex items-center gap-1.5">
@@ -755,19 +840,32 @@ export const PengaturanGuruSection: React.FC<PengaturanGuruSectionProps> = ({
                           className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider ${
                             t.role === 'admin'
                               ? 'bg-amber-100 dark:bg-amber-950/70 text-amber-800 dark:text-amber-300'
+                              : t.role === 'guru_mapel'
+                              ? 'bg-teal-100 dark:bg-teal-950/70 text-teal-800 dark:text-teal-300'
                               : 'bg-indigo-100 dark:bg-indigo-950/70 text-indigo-800 dark:text-indigo-300'
                           }`}
                         >
-                          {t.role === 'admin' ? '👑 Admin / Kepsek' : 'Guru Wali Kelas'}
+                          {t.role === 'admin'
+                            ? '👑 Admin / Kepsek'
+                            : t.role === 'guru_mapel'
+                            ? `⚽ Guru Mapel`
+                            : 'Guru Wali Kelas'}
                         </span>
                       </td>
 
                       <td className="p-3.5">
                         {t.role === 'admin' ? (
                           <span className="text-[11px] font-bold text-amber-700 dark:text-amber-400">Semua Kelas (1-6)</span>
+                        ) : t.role === 'guru_mapel' ? (
+                          <div className="flex flex-col gap-0.5">
+                            <span className="font-bold text-teal-700 dark:text-teal-300 text-[11px]">Kelas 1 s/d 6</span>
+                            <span className="text-[10px] text-teal-600/90 dark:text-teal-400/90 font-semibold truncate max-w-[200px]" title={t.assignedSubjectName}>
+                              Mapel: {t.assignedSubjectName || 'Umum'}
+                            </span>
+                          </div>
                         ) : t.assignedClass ? (
                           <span className="font-black text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-slate-800 px-2 py-0.5 rounded-md border border-indigo-100 dark:border-slate-700">
-                            {t.assignedClass}
+                            {t.assignedClass} (Semua Mapel)
                           </span>
                         ) : (
                           <span className="text-gray-400 dark:text-slate-500 italic">Belum ditentukan</span>
@@ -887,18 +985,18 @@ export const PengaturanGuruSection: React.FC<PengaturanGuruSectionProps> = ({
                 <label className="block text-xs font-bold text-gray-700 dark:text-slate-300 mb-1">
                   Peran / Hak Akses Pengguna: <span className="text-rose-500">*</span>
                 </label>
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                   <button
                     type="button"
-                    onClick={() => setFormData({ ...formData, role: 'guru_wali_kelas' })}
-                    className={`p-3 rounded-2xl border-2 text-left transition-all cursor-pointer ${
+                    onClick={() => setFormData({ ...formData, role: 'guru_wali_kelas', assignedClass: formData.assignedClass || 'Kelas 1' })}
+                    className={`p-2.5 rounded-2xl border-2 text-left transition-all cursor-pointer ${
                       formData.role === 'guru_wali_kelas'
                         ? 'border-indigo-600 bg-indigo-50/60 dark:bg-indigo-950/40 ring-2 ring-indigo-500/20'
                         : 'border-gray-200 dark:border-slate-700 hover:border-gray-300 dark:hover:border-slate-600'
                     }`}
                   >
-                    <div className="flex items-center gap-2 font-black text-xs text-indigo-950 dark:text-indigo-200">
-                      <GraduationCap className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+                    <div className="flex items-center gap-1.5 font-black text-xs text-indigo-950 dark:text-indigo-200">
+                      <GraduationCap className="w-4 h-4 text-indigo-600 dark:text-indigo-400 shrink-0" />
                       <span>Guru Wali Kelas</span>
                     </div>
                     <p className="text-[10px] text-gray-500 dark:text-slate-400 mt-1">Mengelola 1 kelas binaan</p>
@@ -906,18 +1004,40 @@ export const PengaturanGuruSection: React.FC<PengaturanGuruSectionProps> = ({
 
                   <button
                     type="button"
+                    onClick={() => setFormData({ 
+                      ...formData, 
+                      role: 'guru_mapel', 
+                      assignedClass: undefined,
+                      assignedSubjectName: formData.assignedSubjectName || 'Pendidikan Jasmani, Olahraga, dan Kesehatan (PJOK)',
+                      assignedSubjectId: formData.assignedSubjectId || 'mapel-7'
+                    })}
+                    className={`p-2.5 rounded-2xl border-2 text-left transition-all cursor-pointer ${
+                      formData.role === 'guru_mapel'
+                        ? 'border-teal-600 bg-teal-50/60 dark:bg-teal-950/40 ring-2 ring-teal-500/20'
+                        : 'border-gray-200 dark:border-slate-700 hover:border-gray-300 dark:hover:border-slate-600'
+                    }`}
+                  >
+                    <div className="flex items-center gap-1.5 font-black text-xs text-teal-950 dark:text-teal-200">
+                      <BookOpen className="w-4 h-4 text-teal-600 dark:text-teal-400 shrink-0" />
+                      <span>Guru Mapel</span>
+                    </div>
+                    <p className="text-[10px] text-gray-500 dark:text-slate-400 mt-1">PJOK, PAI, B.Inggris, dll</p>
+                  </button>
+
+                  <button
+                    type="button"
                     onClick={() => setFormData({ ...formData, role: 'admin', assignedClass: undefined })}
-                    className={`p-3 rounded-2xl border-2 text-left transition-all cursor-pointer ${
+                    className={`p-2.5 rounded-2xl border-2 text-left transition-all cursor-pointer ${
                       formData.role === 'admin'
                         ? 'border-amber-500 bg-amber-50/60 dark:bg-amber-950/40 ring-2 ring-amber-500/20'
                         : 'border-gray-200 dark:border-slate-700 hover:border-gray-300 dark:hover:border-slate-600'
                     }`}
                   >
-                    <div className="flex items-center gap-2 font-black text-xs text-amber-950 dark:text-amber-200">
-                      <Shield className="w-4 h-4 text-amber-600 dark:text-amber-400" />
-                      <span>Administrator</span>
+                    <div className="flex items-center gap-1.5 font-black text-xs text-amber-950 dark:text-amber-200">
+                      <Shield className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
+                      <span>Admin</span>
                     </div>
-                    <p className="text-[10px] text-gray-500 dark:text-slate-400 mt-1">Akses penuh semua kelas (1-6)</p>
+                    <p className="text-[10px] text-gray-500 dark:text-slate-400 mt-1">Akses penuh semua fitur</p>
                   </button>
                 </div>
               </div>
@@ -1012,42 +1132,116 @@ export const PengaturanGuruSection: React.FC<PengaturanGuruSectionProps> = ({
                 </div>
               </div>
 
-              {/* Assigned Class & Status */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {formData.role === 'guru_wali_kelas' ? (
+              {/* Assigned Class / Subject & Status */}
+              <div className="space-y-3">
+                {formData.role === 'guru_mapel' ? (
+                  <div className="p-3 bg-teal-50/70 dark:bg-teal-950/40 rounded-2xl border border-teal-200 dark:border-teal-800 space-y-2.5">
+                    <label className="block text-xs font-black text-teal-950 dark:text-teal-200 flex items-center justify-between">
+                      <span className="flex items-center gap-1.5">
+                        <BookOpen className="w-4 h-4 text-teal-600" />
+                        <span>Mata Pelajaran yang Diampu: <span className="text-rose-500">*</span></span>
+                      </span>
+                      <span className="text-[10px] font-bold text-teal-700 dark:text-teal-300">
+                        Cakupan: Seluruh Kelas 1-6
+                      </span>
+                    </label>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <div>
+                        <span className="text-[10px] font-bold text-gray-600 dark:text-slate-400 block mb-1">
+                          Pilih Standar Mapel:
+                        </span>
+                        <select
+                          value={
+                            availableSubjects.some(s => s.name === formData.assignedSubjectName)
+                              ? availableSubjects.find(s => s.name === formData.assignedSubjectName)?.id || ''
+                              : 'custom'
+                          }
+                          onChange={(e) => {
+                            const selectedId = e.target.value;
+                            if (selectedId === 'custom') {
+                              // keep current or set default
+                            } else {
+                              const found = availableSubjects.find(s => s.id === selectedId);
+                              if (found) {
+                                setFormData({
+                                  ...formData,
+                                  assignedSubjectId: found.id,
+                                  assignedSubjectName: found.name,
+                                });
+                              }
+                            }
+                          }}
+                          className="w-full text-xs font-bold p-2.5 bg-white dark:bg-slate-900 border border-teal-300 dark:border-teal-700 rounded-xl focus:ring-2 focus:ring-teal-500 text-teal-950 dark:text-teal-100"
+                        >
+                          {availableSubjects.map((s) => (
+                            <option key={s.id} value={s.id} className="dark:bg-slate-900 dark:text-white">
+                              {s.name}
+                            </option>
+                          ))}
+                          <option value="custom" className="dark:bg-slate-900 dark:text-white">
+                            -- Tulis Kustom / Lainnya --
+                          </option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <span className="text-[10px] font-bold text-gray-600 dark:text-slate-400 block mb-1">
+                          Nama Mapel di Sistem/Rapor:
+                        </span>
+                        <input
+                          type="text"
+                          required
+                          value={formData.assignedSubjectName || ''}
+                          onChange={(e) => setFormData({ ...formData, assignedSubjectName: e.target.value })}
+                          placeholder="Nama Mata Pelajaran..."
+                          className="w-full text-xs font-bold p-2.5 bg-white dark:bg-slate-900 border border-teal-300 dark:border-teal-700 rounded-xl focus:ring-2 focus:ring-teal-500 text-teal-950 dark:text-teal-100"
+                        />
+                      </div>
+                    </div>
+
+                    <p className="text-[10px] text-teal-700 dark:text-teal-300 font-medium">
+                      💡 Guru Mapel dapat login mandiri untuk menginput nilai dan tujuan pembelajaran (TP) mapel ini untuk semua kelas 1-6.
+                    </p>
+                  </div>
+                ) : null}
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {formData.role === 'guru_wali_kelas' ? (
+                    <div>
+                      <label className="block text-xs font-bold text-gray-700 dark:text-slate-300 mb-1">Kelas yang Diampu:</label>
+                      <select
+                        value={formData.assignedClass || 'Kelas 1'}
+                        onChange={(e) => setFormData({ ...formData, assignedClass: e.target.value as ClassLevel })}
+                        className="w-full text-xs font-bold p-2.5 bg-gray-50 dark:bg-slate-800 border border-gray-300 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-indigo-500 text-gray-900 dark:text-white"
+                      >
+                        {classList.map((c) => (
+                          <option key={c} value={c} className="dark:bg-slate-900 dark:text-white">
+                            {c}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  ) : formData.role === 'admin' ? (
+                    <div>
+                      <label className="block text-xs font-bold text-gray-700 dark:text-slate-300 mb-1">Cakupan Kelas:</label>
+                      <div className="p-2.5 bg-amber-50 dark:bg-amber-950/50 border border-amber-200 dark:border-amber-800 rounded-xl text-xs font-bold text-amber-800 dark:text-amber-300">
+                        Semua Kelas (Kelas 1 s/d 6)
+                      </div>
+                    </div>
+                  ) : null}
+
                   <div>
-                    <label className="block text-xs font-bold text-gray-700 dark:text-slate-300 mb-1">Kelas yang Diampu:</label>
+                    <label className="block text-xs font-bold text-gray-700 dark:text-slate-300 mb-1">Status Akun:</label>
                     <select
-                      value={formData.assignedClass || 'Kelas 1'}
-                      onChange={(e) => setFormData({ ...formData, assignedClass: e.target.value as ClassLevel })}
+                      value={formData.status}
+                      onChange={(e) => setFormData({ ...formData, status: e.target.value as 'aktif' | 'nonaktif' })}
                       className="w-full text-xs font-bold p-2.5 bg-gray-50 dark:bg-slate-800 border border-gray-300 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-indigo-500 text-gray-900 dark:text-white"
                     >
-                      {classList.map((c) => (
-                        <option key={c} value={c} className="dark:bg-slate-900 dark:text-white">
-                          {c}
-                        </option>
-                      ))}
+                      <option value="aktif" className="dark:bg-slate-900 dark:text-white">Aktif (Dapat Masuk)</option>
+                      <option value="nonaktif" className="dark:bg-slate-900 dark:text-white">Nonaktif (Dibekukan)</option>
                     </select>
                   </div>
-                ) : (
-                  <div>
-                    <label className="block text-xs font-bold text-gray-700 dark:text-slate-300 mb-1">Cakupan Kelas:</label>
-                    <div className="p-2.5 bg-amber-50 dark:bg-amber-950/50 border border-amber-200 dark:border-amber-800 rounded-xl text-xs font-bold text-amber-800 dark:text-amber-300">
-                      Semua Kelas (Kelas 1 s/d 6)
-                    </div>
-                  </div>
-                )}
-
-                <div>
-                  <label className="block text-xs font-bold text-gray-700 dark:text-slate-300 mb-1">Status Akun:</label>
-                  <select
-                    value={formData.status}
-                    onChange={(e) => setFormData({ ...formData, status: e.target.value as 'aktif' | 'nonaktif' })}
-                    className="w-full text-xs font-bold p-2.5 bg-gray-50 dark:bg-slate-800 border border-gray-300 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-indigo-500 text-gray-900 dark:text-white"
-                  >
-                    <option value="aktif" className="dark:bg-slate-900 dark:text-white">Aktif (Dapat Masuk)</option>
-                    <option value="nonaktif" className="dark:bg-slate-900 dark:text-white">Nonaktif (Dibekukan)</option>
-                  </select>
                 </div>
               </div>
 

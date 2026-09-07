@@ -78,11 +78,17 @@ export const Navigation: React.FC<NavigationProps> = ({
     {
       id: 'gradebook',
       aliases: ['buku-nilai'],
-      label: 'Buku Nilai (Gradebook)',
+      label: currentUser?.role === 'guru_mapel' && currentUser.assignedSubjectName
+        ? `Nilai ${currentUser.assignedSubjectName.includes('PJOK') ? 'PJOK' : currentUser.assignedSubjectName.includes('Agama') ? 'PAI' : currentUser.assignedSubjectName.includes('Inggris') ? 'B. Inggris' : 'Mapel'}`
+        : 'Buku Nilai (Gradebook)',
       shortLabel: 'Nilai',
       icon: <Calculator className="w-5 h-5 shrink-0 text-teal-400" />,
-      badge: 'NA Fleksibel',
-      badgeColor: 'bg-teal-100 text-teal-800 dark:bg-teal-950 dark:text-teal-300 font-bold',
+      badge: currentUser?.role === 'guru_mapel'
+        ? currentUser.assignedSubjectName?.includes('PJOK') ? 'PJOK' : currentUser.assignedSubjectName?.includes('Agama') ? 'PAI' : 'Mapel'
+        : 'NA Fleksibel',
+      badgeColor: currentUser?.role === 'guru_mapel'
+        ? 'bg-teal-500 text-white font-black'
+        : 'bg-teal-100 text-teal-800 dark:bg-teal-950 dark:text-teal-300 font-bold',
       category: 'penilaian',
     },
     {

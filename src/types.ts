@@ -189,7 +189,7 @@ export interface SchoolProfile {
   signatureSettings?: SignatureSettings;
 }
 
-export type UserRole = 'admin' | 'guru_wali_kelas';
+export type UserRole = 'admin' | 'guru_wali_kelas' | 'guru_mapel';
 
 export interface TeacherAccount {
   id: string;
@@ -200,6 +200,9 @@ export interface TeacherAccount {
   pin?: string;
   role: UserRole;
   assignedClass?: ClassLevel; // e.g. 'Kelas 1', 'Kelas 2', etc. Only for guru_wali_kelas
+  assignedSubjectId?: string; // For guru_mapel (e.g. 'mapel-7' for PJOK, 'mapel-1' for PAI, 'mapel-8' for Bahasa Inggris)
+  assignedSubjectName?: string; // e.g. 'Pendidikan Jasmani, Olahraga, dan Kesehatan (PJOK)'
+  assignedClasses?: ClassLevel[]; // Multi-class teaching capability (e.g. Kelas 1-6)
   phone?: string;
   avatar?: string;
   status: 'aktif' | 'nonaktif';

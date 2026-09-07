@@ -582,6 +582,7 @@ export function App() {
               subjects={subjects}
               grades={grades}
               activeClassLevel={activeClassLevel}
+              currentUser={currentUser}
               onSelectClassLevel={handleSelectClassLevel}
               onNavigate={(tab) => setActiveTab(tab)}
             />
@@ -593,6 +594,7 @@ export function App() {
               subjects={subjects}
               grades={grades}
               activeClassLevel={activeClassLevel}
+              currentUser={currentUser}
               onSelectClassLevel={handleSelectClassLevel}
               onUpdateGrade={handleUpdateGrade}
               onBatchUpdateGrades={handleBatchUpdateGrades}
@@ -607,6 +609,7 @@ export function App() {
               grades={grades}
               schoolProfile={schoolProfile}
               activeClassLevel={activeClassLevel}
+              currentUser={currentUser}
               onSelectClassLevel={handleSelectClassLevel}
               initialStudentId={activeTargetStudentId}
               initialSubjectId={activeTargetSubjectId}
@@ -718,6 +721,7 @@ export function App() {
             <BankTPView
               subjects={subjects}
               activeClassLevel={activeClassLevel}
+              currentUser={currentUser}
               onSelectClassLevel={handleSelectClassLevel}
               onUpdateSubjects={setSubjects}
             />

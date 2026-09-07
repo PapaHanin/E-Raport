@@ -8,6 +8,7 @@ import {
   ClassLevel,
   getFaseByClass,
   isIPASActiveForClass,
+  TeacherAccount,
 } from '../types';
 import { getSubjectsForClass } from '../data/initialData';
 import {
@@ -26,6 +27,7 @@ import {
   ArrowRight,
   GraduationCap,
   Info,
+  Lock,
 } from 'lucide-react';
 
 interface DashboardViewProps {
@@ -34,6 +36,7 @@ interface DashboardViewProps {
   grades: NilaiSiswaMapel[];
   schoolProfile: SchoolProfile;
   activeClassLevel?: ClassLevel;
+  currentUser?: TeacherAccount | null;
   onSelectClassLevel?: (classLevel: ClassLevel) => void;
   onNavigate: (tab: ActiveTab, params?: any) => void;
   onSelectStudent?: (studentId: string) => void;
@@ -46,6 +49,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   grades,
   schoolProfile,
   activeClassLevel = 'Kelas 4',
+  currentUser,
   onSelectClassLevel,
   onNavigate,
   onSelectStudent,
@@ -54,6 +58,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   const classLevels: ClassLevel[] = ['Kelas 1', 'Kelas 2', 'Kelas 3', 'Kelas 4', 'Kelas 5', 'Kelas 6'];
   const currentFase = getFaseByClass(activeClassLevel);
   const isIPASVisible = isIPASActiveForClass(activeClassLevel);
+
+  const isGuruMapel = currentUser?.role === 'guru_mapel';
+  const isWaliKelas = currentUser?.role === 'guru_wali_kelas';
 
   // Filter students for active class
   const classStudents = students.filter(
@@ -125,29 +132,67 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
         {/* Class Switcher */}
         {onSelectClassLevel && (
-          <div className="flex items-center gap-1.5 bg-gray-100 dark:bg-slate-800 p-1 rounded-2xl overflow-x-auto">
-            <span className="text-[11px] font-black text-gray-500 dark:text-slate-400 px-2 uppercase tracking-wider">
-              Kelas:
-            </span>
-            {classLevels.map((lvl) => {
-              const isActive = lvl === activeClassLevel;
-              return (
-                <button
-                  key={lvl}
-                  onClick={() => onSelectClassLevel(lvl)}
-                  className={`px-3 py-1 rounded-xl text-xs font-black transition-all ${
-                    isActive
-                      ? 'bg-[#4F46E5] text-white shadow-xs'
-                      : 'text-gray-700 dark:text-slate-300 hover:text-indigo-700 dark:hover:text-white hover:bg-white/80 dark:hover:bg-slate-700'
-                  }`}
-                >
-                  {lvl}
-                </button>
-              );
-            })}
-          </div>
+          isWaliKelas ? (
+            <div className="flex items-center gap-1.5 bg-amber-100/90 dark:bg-amber-950/60 border border-amber-300 dark:border-amber-700 text-amber-900 dark:text-amber-200 px-3 py-1.5 rounded-xl text-xs font-black shadow-xs">
+              <Lock className="w-3.5 h-3.5 text-amber-700 dark:text-amber-400 shrink-0" />
+              <span>{currentUser?.assignedClass || activeClassLevel} (Terkunci Khusus Wali Kelas)</span>
+            </div>
+          ) : (
+            <div className="flex items-center gap-1.5 bg-gray-100 dark:bg-slate-800 p-1 rounded-2xl overflow-x-auto">
+              <span className="text-[11px] font-black text-gray-500 dark:text-slate-400 px-2 uppercase tracking-wider">
+                Kelas:
+              </span>
+              {classLevels.map((lvl) => {
+                const isActive = lvl === activeClassLevel;
+                return (
+                  <button
+                    key={lvl}
+                    onClick={() => onSelectClassLevel(lvl)}
+                    className={`px-3 py-1 rounded-xl text-xs font-black transition-all ${
+                      isActive
+                        ? 'bg-[#4F46E5] text-white shadow-xs'
+                        : 'text-gray-700 dark:text-slate-300 hover:text-indigo-700 dark:hover:text-white hover:bg-white/80 dark:hover:bg-slate-700'
+                    }`}
+                  >
+                    {lvl}
+                  </button>
+                );
+              })}
+            </div>
+          )
         )}
       </div>
+
+      {/* Guru Mapel Role Welcome Card */}
+      {isGuruMapel && (
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 bg-teal-50 dark:bg-teal-950/40 rounded-2xl border-2 border-teal-300 dark:border-teal-700 text-xs shadow-xs animate-fadeIn">
+          <div className="flex items-center gap-2.5">
+            <div className="w-9 h-9 rounded-xl bg-teal-600 text-white flex items-center justify-center font-black shrink-0 shadow-xs">
+              <BookOpen className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="font-black text-teal-950 dark:text-teal-200 text-xs sm:text-sm">
+                  Selamat Datang, {currentUser?.name || 'Guru Mapel'} ({currentUser?.assignedSubjectName || 'Mapel Khusus'})
+                </span>
+                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black bg-teal-600 text-white flex items-center gap-1">
+                  <Lock className="w-2.5 h-2.5" /> Terkunci Mapel Anda
+                </span>
+              </div>
+              <p className="text-[11px] text-teal-800/90 dark:text-teal-300/90 font-medium mt-0.5">
+                Nilai dan narasi rapor yang Anda isi pada tab <strong>Buku Nilai</strong> dan <strong>AI Narasi Rapor</strong> otomatis tersambung ke lembar rapor seluruh kelas yang dikelola oleh masing-masing Wali Kelas.
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={() => onNavigate('gradebook')}
+            className="px-3.5 py-2 bg-teal-600 hover:bg-teal-500 text-white font-black rounded-xl text-xs flex items-center gap-1.5 shrink-0 shadow-xs cursor-pointer"
+          >
+            <span>Buka Lembar Nilai</span>
+            <ArrowRight className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
 
       {/* Notice for Kelas 1 & 2 IPAS */}
       {!isIPASVisible && (

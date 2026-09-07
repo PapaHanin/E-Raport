@@ -65,6 +65,15 @@ export const Header: React.FC<HeaderProps> = ({
   const currentFase = getFaseByClass(activeClassLevel);
 
   const isTeacherLocked = currentUser?.role === 'guru_wali_kelas';
+  const isGuruMapel = currentUser?.role === 'guru_mapel';
+
+  const getMapelShortCode = (subjectName?: string) => {
+    const s = (subjectName || '').toLowerCase();
+    if (s.includes('pjok') || s.includes('jasmani')) return 'PJOK';
+    if (s.includes('pai') || s.includes('agama islam')) return 'PAI';
+    if (s.includes('inggris')) return 'BING';
+    return 'MP';
+  };
 
   return (
     <header className="print:hidden bg-white dark:bg-slate-900 border-b-2 border-indigo-100 dark:border-slate-800 sticky top-0 z-30 shadow-xs transition-colors duration-200" id="app-main-header">
@@ -150,6 +159,11 @@ export const Header: React.FC<HeaderProps> = ({
                         </option>
                       ))}
                     </select>
+                    {isGuruMapel && (
+                      <span className="hidden xl:inline-block text-[10px] font-bold text-teal-700 dark:text-teal-300 bg-teal-100 dark:bg-teal-950/80 px-2 py-0.5 rounded-lg border border-teal-200 dark:border-teal-800">
+                        Input Mapel Kelas 1-6
+                      </span>
+                    )}
                   </>
                 )}
               </div>
@@ -161,23 +175,41 @@ export const Header: React.FC<HeaderProps> = ({
                 type="button"
                 id="header-btn-user-account"
                 onClick={onOpenAccountModal}
-                className="inline-flex items-center gap-2 px-3 py-1.5 rounded-2xl bg-white dark:bg-slate-800 hover:bg-gray-50 dark:hover:bg-slate-700 border-2 border-indigo-200 dark:border-slate-700 shadow-xs text-xs font-bold text-gray-800 dark:text-slate-200 transition-all hover:scale-[1.01] active:scale-95"
+                className="inline-flex items-center gap-2 px-3 py-1.5 rounded-2xl bg-white dark:bg-slate-800 hover:bg-gray-50 dark:hover:bg-slate-700 border-2 border-indigo-200 dark:border-slate-700 shadow-xs text-xs font-bold text-gray-800 dark:text-slate-200 transition-all hover:scale-[1.01] active:scale-95 cursor-pointer"
                 title="Klik untuk lihat profil / masuk dengan email guru lain"
               >
                 <div
                   className={`w-6 h-6 rounded-lg flex items-center justify-center font-black text-[10px] text-white ${
-                    currentUser.role === 'admin' ? 'bg-amber-500' : 'bg-[#4F46E5]'
+                    currentUser.role === 'admin'
+                      ? 'bg-amber-500'
+                      : currentUser.role === 'guru_mapel'
+                      ? 'bg-teal-600'
+                      : 'bg-[#4F46E5]'
                   }`}
                 >
-                  {currentUser.role === 'admin' ? 'ADM' : currentUser.assignedClass?.replace('Kelas ', 'K') || 'GK'}
+                  {currentUser.role === 'admin'
+                    ? 'ADM'
+                    : currentUser.role === 'guru_mapel'
+                    ? getMapelShortCode(currentUser.assignedSubjectName)
+                    : currentUser.assignedClass?.replace('Kelas ', 'K') || 'GK'}
                 </div>
 
                 <div className="text-left hidden md:block">
                   <p className="text-xs font-black text-gray-900 dark:text-white leading-tight truncate max-w-[120px]">
                     {currentUser.name.split(',')[0]}
                   </p>
-                  <p className="text-[10px] text-indigo-600 dark:text-indigo-400 font-bold leading-tight flex items-center gap-0.5">
-                    {currentUser.role === 'admin' ? '👑 Admin Sekolah' : `🔒 Wali ${currentUser.assignedClass}`}
+                  <p className="text-[10px] font-bold leading-tight flex items-center gap-0.5 truncate max-w-[140px]">
+                    {currentUser.role === 'admin' && (
+                      <span className="text-amber-700 dark:text-amber-400">👑 Admin Sekolah</span>
+                    )}
+                    {currentUser.role === 'guru_wali_kelas' && (
+                      <span className="text-indigo-600 dark:text-indigo-400">🔒 Wali {currentUser.assignedClass}</span>
+                    )}
+                    {currentUser.role === 'guru_mapel' && (
+                      <span className="text-teal-700 dark:text-teal-300 font-bold truncate">
+                        ⚽ Guru {currentUser.assignedSubjectName?.split('(')[0]?.trim() || 'Mapel'}
+                      </span>
+                    )}
                   </p>
                 </div>
 

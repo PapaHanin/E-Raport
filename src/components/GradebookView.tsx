@@ -1,5 +1,5 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { MataPelajaran, NilaiSiswaMapel, Student, Predikat, ClassLevel, getFaseByClass, isIPASActiveForClass } from '../types';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
+import { MataPelajaran, NilaiSiswaMapel, Student, Predikat, ClassLevel, TeacherAccount, getFaseByClass, isIPASActiveForClass } from '../types';
 import { calculateGrade, findExtremeTPs, generateDefaultNarasi } from '../utils/calculator';
 import { getSubjectsForClass } from '../data/initialData';
 import {
@@ -21,6 +21,8 @@ import {
   Layers,
   ArrowUpDown,
   FileSpreadsheet,
+  Filter,
+  Lock,
 } from 'lucide-react';
 import { downloadExcelTemplate, exportClassDataToExcel } from '../utils/excelService';
 
@@ -29,6 +31,7 @@ interface GradebookViewProps {
   subjects: MataPelajaran[];
   grades: NilaiSiswaMapel[];
   activeClassLevel?: ClassLevel;
+  currentUser?: TeacherAccount | null;
   onSelectClassLevel?: (classLevel: ClassLevel) => void;
   onUpdateGrade: (updatedGrade: NilaiSiswaMapel) => void;
   onBatchUpdateGrades: (updatedGrades: NilaiSiswaMapel[]) => void;
@@ -40,6 +43,7 @@ export const GradebookView: React.FC<GradebookViewProps> = ({
   subjects,
   grades,
   activeClassLevel = 'Kelas 4',
+  currentUser,
   onSelectClassLevel,
   onUpdateGrade,
   onBatchUpdateGrades,
@@ -52,17 +56,64 @@ export const GradebookView: React.FC<GradebookViewProps> = ({
   // Filter subjects for the active class level (Excluding IPAS for Kelas 1 & 2)
   const activeClassSubjects = getSubjectsForClass(subjects, activeClassLevel);
 
+  // Check Guru Mapel and Wali Kelas Roles
+  const isGuruMapel = currentUser?.role === 'guru_mapel';
+  const isWaliKelas = currentUser?.role === 'guru_wali_kelas';
+  
+  // Find subject assigned to this Guru Mapel
+  const assignedSubject = useMemo(() => {
+    if (!isGuruMapel || !currentUser) return null;
+    return (
+      activeClassSubjects.find(
+        (s) =>
+          s.id === currentUser.assignedSubjectId ||
+          (currentUser.assignedSubjectName && s.name.toLowerCase() === currentUser.assignedSubjectName.toLowerCase()) ||
+          (currentUser.assignedSubjectName && s.name.toLowerCase().includes(currentUser.assignedSubjectName.toLowerCase())) ||
+          (currentUser.assignedSubjectName && currentUser.assignedSubjectName.toLowerCase().includes(s.name.toLowerCase()))
+      ) ||
+      // Fallback matching
+      activeClassSubjects.find((s) => {
+        const mapelName = (currentUser.assignedSubjectName || '').toLowerCase();
+        if (mapelName.includes('pjok') || mapelName.includes('olahraga')) {
+          return s.name.toLowerCase().includes('olahraga') || s.name.toLowerCase().includes('pjok');
+        }
+        if (mapelName.includes('agama') || mapelName.includes('pai') || mapelName.includes('islam')) {
+          return s.name.toLowerCase().includes('agama') || s.id === 'mapel-1';
+        }
+        if (mapelName.includes('inggris')) {
+          return s.name.toLowerCase().includes('inggris');
+        }
+        return false;
+      }) ||
+      null
+    );
+  }, [isGuruMapel, currentUser, activeClassSubjects]);
+
+  // Subjects displayed in the selector:
+  // IF Guru Mapel: STRICTLY LOCKED to their assigned subject only! Cannot view other subjects.
+  const displayedSubjects = useMemo(() => {
+    if (isGuruMapel) {
+      return assignedSubject ? [assignedSubject] : [];
+    }
+    return activeClassSubjects;
+  }, [isGuruMapel, assignedSubject, activeClassSubjects]);
+
   const [selectedSubjectId, setSelectedSubjectId] = useState<string>(() => {
+    if (isGuruMapel && assignedSubject) return assignedSubject.id;
     return activeClassSubjects[0]?.id || 'mapel-1';
   });
 
-  // Keep selectedSubjectId valid when class changes
+  // Keep selectedSubjectId valid when class or user changes
   useEffect(() => {
-    const isValid = activeClassSubjects.some((s) => s.id === selectedSubjectId);
-    if (!isValid && activeClassSubjects.length > 0) {
-      setSelectedSubjectId(activeClassSubjects[0].id);
+    if (isGuruMapel && assignedSubject) {
+      setSelectedSubjectId(assignedSubject.id);
+      return;
     }
-  }, [activeClassLevel, activeClassSubjects, selectedSubjectId]);
+    const isValid = displayedSubjects.some((s) => s.id === selectedSubjectId);
+    if (!isValid && displayedSubjects.length > 0) {
+      setSelectedSubjectId(displayedSubjects[0].id);
+    }
+  }, [activeClassLevel, isGuruMapel, assignedSubject, displayedSubjects, selectedSubjectId]);
 
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [activeTabSubView, setActiveTabSubView] = useState<'sumatif' | 'formatif'>('sumatif');
@@ -453,29 +504,78 @@ export const GradebookView: React.FC<GradebookViewProps> = ({
 
           {/* Class Switcher Pills */}
           {onSelectClassLevel && (
-            <div className="flex items-center gap-1.5 bg-gray-100 p-1.5 rounded-2xl overflow-x-auto">
-              <span className="text-[11px] font-black text-gray-500 px-2 uppercase tracking-wider">
-                Pilih Kelas:
-              </span>
-              {classLevels.map((lvl) => {
-                const isActive = lvl === activeClassLevel;
-                return (
-                  <button
-                    key={lvl}
-                    onClick={() => onSelectClassLevel(lvl)}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all ${
-                      isActive
-                        ? 'bg-[#4F46E5] text-white shadow-xs scale-[1.03]'
-                        : 'text-gray-700 hover:text-indigo-700 hover:bg-white/80'
-                    }`}
-                  >
-                    {lvl}
-                  </button>
-                );
-              })}
-            </div>
+            isWaliKelas ? (
+              <div className="flex items-center gap-2 bg-amber-100/90 dark:bg-amber-950/60 border-2 border-amber-300 dark:border-amber-700 text-amber-900 dark:text-amber-200 px-4 py-2 rounded-2xl text-xs font-black shadow-xs">
+                <Lock className="w-4 h-4 text-amber-700 dark:text-amber-400 shrink-0" />
+                <span>{currentUser?.assignedClass || activeClassLevel} (Terkunci Khusus Wali Kelas)</span>
+              </div>
+            ) : (
+              <div className="flex items-center gap-1.5 bg-gray-100 dark:bg-slate-800 p-1.5 rounded-2xl overflow-x-auto">
+                <span className="text-[11px] font-black text-gray-500 dark:text-slate-400 px-2 uppercase tracking-wider">
+                  Pilih Kelas:
+                </span>
+                {classLevels.map((lvl) => {
+                  const isActive = lvl === activeClassLevel;
+                  return (
+                    <button
+                      key={lvl}
+                      onClick={() => onSelectClassLevel(lvl)}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all ${
+                        isActive
+                          ? 'bg-[#4F46E5] text-white shadow-xs scale-[1.03]'
+                          : 'text-gray-700 dark:text-slate-300 hover:text-indigo-700 hover:bg-white/80 dark:hover:bg-slate-700'
+                      }`}
+                    >
+                      {lvl}
+                    </button>
+                  );
+                })}
+              </div>
+            )
           )}
         </div>
+
+        {/* Guru Mapel Role Banner (Strictly Locked to Assigned Subject) */}
+        {isGuruMapel && (
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 bg-gradient-to-r from-teal-50 to-emerald-50 dark:from-teal-950/40 dark:to-emerald-950/40 rounded-2xl border-2 border-teal-300 dark:border-teal-700 text-xs shadow-xs animate-fadeIn">
+            <div className="flex items-center gap-2.5">
+              <div className="w-9 h-9 rounded-xl bg-teal-600 text-white flex items-center justify-center font-black shrink-0 shadow-xs">
+                <BookOpen className="w-5 h-5" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="font-black text-teal-950 dark:text-teal-200 text-xs sm:text-sm">
+                    Portal Guru Mapel: {assignedSubject ? assignedSubject.name : currentUser?.assignedSubjectName || 'Mapel Khusus'}
+                  </span>
+                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black bg-teal-600 text-white flex items-center gap-1">
+                    <Lock className="w-2.5 h-2.5" />
+                    Terkunci Khusus Mapel Ini
+                  </span>
+                </div>
+                <p className="text-[11px] text-teal-800/90 dark:text-teal-300/90 font-medium mt-0.5">
+                  Anda berwenang menginput nilai sumatif, formatif, dan narasi rapor untuk mapel ini pada semua rombel (Kelas 1 - 6). Akses mapel lain dikunci demi kerahasiaan & integritas data.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 shrink-0">
+              <span className="text-xs font-bold text-teal-800 dark:text-teal-200 bg-white/90 dark:bg-slate-800/90 px-3 py-1.5 rounded-xl border border-teal-200 dark:border-teal-700 flex items-center gap-1.5 shadow-2xs">
+                <Check className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
+                <span>Nilai otomatis terbaca di Wali Kelas</span>
+              </span>
+            </div>
+          </div>
+        )}
+
+        {/* Informational banner for Wali Kelas when inspecting Guru Mapel's Subject */}
+        {isWaliKelas && (currentSubject?.name.toLowerCase().includes('olahraga') || currentSubject?.name.toLowerCase().includes('pjok') || currentSubject?.name.toLowerCase().includes('agama') || currentSubject?.name.toLowerCase().includes('inggris')) && (
+          <div className="flex items-center gap-2 p-3 bg-teal-50/90 dark:bg-teal-950/40 rounded-2xl border border-teal-200 dark:border-teal-800 text-xs text-teal-900 dark:text-teal-200 font-medium">
+            <Info className="w-4 h-4 text-teal-600 dark:text-teal-400 shrink-0" />
+            <span>
+              <strong>Integrasi Guru Mapel:</strong> Nilai mata pelajaran <strong>{currentSubject?.name}</strong> diinput langsung oleh Guru Mapel bersangkutan. Semua nilai otomatis tersinkronisasi ke dalam tabel buku nilai ini dan siap dicetak ke e-Rapor kelas Anda.
+            </span>
+          </div>
+        )}
 
         {/* IPAS Info Notice for Kelas 1 & 2 */}
         {!isIPASVisible && (
@@ -490,9 +590,17 @@ export const GradebookView: React.FC<GradebookViewProps> = ({
         {/* Subject Pills Horizontal Scroll */}
         <div className="border-t border-gray-100 pt-3">
           <div className="flex items-center justify-between gap-2 mb-2">
-            <span className="text-xs font-black text-gray-400 uppercase tracking-wider">
-              Mata Pelajaran Aktif ({activeClassSubjects.length} Mapel):
-            </span>
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-black text-gray-400 uppercase tracking-wider">
+                Mata Pelajaran Aktif ({displayedSubjects.length} Mapel):
+              </span>
+              {isGuruMapel && (
+                <span className="text-[10px] font-bold bg-teal-100 text-teal-800 px-2 py-0.5 rounded-full flex items-center gap-1">
+                  <Lock className="w-2.5 h-2.5" />
+                  Terkunci Mapel Anda
+                </span>
+              )}
+            </div>
             <div className="flex items-center gap-2 flex-wrap">
               <button
                 type="button"
@@ -552,8 +660,9 @@ export const GradebookView: React.FC<GradebookViewProps> = ({
           </div>
 
           <div className="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-none no-scrollbar">
-            {activeClassSubjects.map((subj) => {
+            {displayedSubjects.map((subj) => {
               const isSelected = subj.id === selectedSubjectId;
+              const isMySubject = isGuruMapel && assignedSubject?.id === subj.id;
               return (
                 <button
                   key={subj.id}
@@ -561,11 +670,18 @@ export const GradebookView: React.FC<GradebookViewProps> = ({
                   onClick={() => setSelectedSubjectId(subj.id)}
                   className={`px-3.5 py-2.5 rounded-2xl text-xs font-bold whitespace-nowrap transition-all flex items-center gap-2 ${
                     isSelected
-                      ? 'bg-[#4F46E5] text-white shadow-md shadow-indigo-500/20 scale-[1.02]'
+                      ? isGuruMapel
+                        ? 'bg-teal-600 text-white shadow-md shadow-teal-500/20 scale-[1.02]'
+                        : 'bg-[#4F46E5] text-white shadow-md shadow-indigo-500/20 scale-[1.02]'
                       : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                   }`}
                 >
                   <span>{subj.name}</span>
+                  {isMySubject && (
+                    <span className="text-[9px] bg-teal-800 text-white px-1.5 py-0.5 rounded-full uppercase font-black">
+                      Mapel Anda
+                    </span>
+                  )}
                   <span
                     className={`text-[10px] px-2 py-0.5 rounded-full font-black ${
                       isSelected ? 'bg-yellow-400 text-black' : 'bg-white text-gray-600'

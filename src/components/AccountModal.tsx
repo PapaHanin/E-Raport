@@ -20,6 +20,8 @@ import {
   HelpCircle,
   Copy,
   Check,
+  Award,
+  BookOpen,
 } from 'lucide-react';
 
 interface AccountModalProps {
@@ -177,11 +179,17 @@ export const AccountModal: React.FC<AccountModalProps> = ({
                   <div className="flex items-center gap-3.5">
                     <div
                       className={`w-12 h-12 rounded-2xl flex items-center justify-center font-black text-sm text-white shadow-md ${
-                        currentUser.role === 'admin' ? 'bg-amber-500' : 'bg-[#4F46E5]'
+                        currentUser.role === 'admin'
+                          ? 'bg-amber-500'
+                          : currentUser.role === 'guru_mapel'
+                          ? 'bg-teal-600'
+                          : 'bg-[#4F46E5]'
                       }`}
                     >
                       {currentUser.role === 'admin'
                         ? 'ADM'
+                        : currentUser.role === 'guru_mapel'
+                        ? (currentUser.assignedSubjectName?.includes('PJOK') ? 'PJOK' : currentUser.assignedSubjectName?.includes('Islam') ? 'PAI' : 'MP')
                         : currentUser.assignedClass?.replace('Kelas ', 'K') || 'GK'}
                     </div>
                     <div>
@@ -189,6 +197,8 @@ export const AccountModal: React.FC<AccountModalProps> = ({
                         className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider ${
                           currentUser.role === 'admin'
                             ? 'bg-amber-100 text-amber-900 border border-amber-300'
+                            : currentUser.role === 'guru_mapel'
+                            ? 'bg-teal-100 text-teal-900 border border-teal-300'
                             : 'bg-indigo-100 text-indigo-900 border border-indigo-300'
                         }`}
                       >
@@ -196,6 +206,11 @@ export const AccountModal: React.FC<AccountModalProps> = ({
                           <>
                             <Shield className="w-3 h-3 text-amber-700" />
                             <span>Administrator / Kepala Sekolah</span>
+                          </>
+                        ) : currentUser.role === 'guru_mapel' ? (
+                          <>
+                            <Award className="w-3 h-3 text-teal-700" />
+                            <span>Guru Mapel: {currentUser.assignedSubjectName?.split('(')[0]?.trim() || 'Mata Pelajaran'}</span>
                           </>
                         ) : (
                           <>
@@ -226,9 +241,13 @@ export const AccountModal: React.FC<AccountModalProps> = ({
                     <strong className="text-gray-900 font-mono">{currentUser.nip || '-'}</strong>
                   </div>
                   <div className="bg-white/80 p-2.5 rounded-xl border border-indigo-100">
-                    <span className="text-[10px] text-gray-500 font-bold block uppercase">Akses Kelas</span>
+                    <span className="text-[10px] text-gray-500 font-bold block uppercase">Akses Kelas & Mapel</span>
                     <strong className="text-indigo-900 font-bold">
-                      {currentUser.role === 'admin' ? 'Semua Kelas (1-6)' : `Terkunci di ${currentUser.assignedClass}`}
+                      {currentUser.role === 'admin'
+                        ? 'Semua Kelas (1-6)'
+                        : currentUser.role === 'guru_mapel'
+                        ? `Kelas 1-6 (${currentUser.assignedSubjectName?.split('(')[0]?.trim() || 'Mapel'})`
+                        : `Terkunci di ${currentUser.assignedClass}`}
                     </strong>
                   </div>
                 </div>
@@ -410,11 +429,19 @@ export const AccountModal: React.FC<AccountModalProps> = ({
                           <div className="flex items-center gap-1.5">
                             <span className="font-black text-gray-900 truncate">{t.name}</span>
                             <span
-                              className={`text-[9px] px-1.5 py-0.2 rounded-full font-bold ${
-                                t.role === 'admin' ? 'bg-amber-100 text-amber-800' : 'bg-indigo-100 text-indigo-800'
+                              className={`text-[9px] px-1.5 py-0.5 rounded-full font-bold ${
+                                t.role === 'admin'
+                                  ? 'bg-amber-100 text-amber-800'
+                                  : t.role === 'guru_mapel'
+                                  ? 'bg-teal-100 text-teal-800'
+                                  : 'bg-indigo-100 text-indigo-800'
                               }`}
                             >
-                              {t.role === 'admin' ? 'Admin' : t.assignedClass}
+                              {t.role === 'admin'
+                                ? 'Admin'
+                                : t.role === 'guru_mapel'
+                                ? `Mapel: ${t.assignedSubjectName?.split('(')[0]?.trim() || 'Guru Mapel'}`
+                                : t.assignedClass}
                             </span>
                           </div>
                           <p className="text-[11px] font-mono text-gray-600 truncate">{t.email}</p>

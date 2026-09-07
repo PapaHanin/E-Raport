@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   MataPelajaran,
   TujuanPembelajaran,
@@ -6,6 +6,7 @@ import {
   ClassLevel,
   getFaseByClass,
   isIPASActiveForClass,
+  TeacherAccount,
 } from '../types';
 import { getSubjectsForClass } from '../data/initialData';
 import {
@@ -19,11 +20,14 @@ import {
   Sparkles,
   GraduationCap,
   Info,
+  Lock,
+  BookOpen,
 } from 'lucide-react';
 
 interface BankTPViewProps {
   subjects: MataPelajaran[];
   activeClassLevel?: ClassLevel;
+  currentUser?: TeacherAccount | null;
   onSelectClassLevel?: (classLevel: ClassLevel) => void;
   onUpdateSubjects: (updatedSubjects: MataPelajaran[]) => void;
 }
@@ -31,6 +35,7 @@ interface BankTPViewProps {
 export const BankTPView: React.FC<BankTPViewProps> = ({
   subjects,
   activeClassLevel = 'Kelas 4',
+  currentUser,
   onSelectClassLevel,
   onUpdateSubjects,
 }) => {
@@ -38,17 +43,62 @@ export const BankTPView: React.FC<BankTPViewProps> = ({
   const currentFase = getFaseByClass(activeClassLevel);
   const isIPASVisible = isIPASActiveForClass(activeClassLevel);
 
-  const activeSubjects = getSubjectsForClass(subjects, activeClassLevel);
+  const isGuruMapel = currentUser?.role === 'guru_mapel';
+  const isWaliKelas = currentUser?.role === 'guru_wali_kelas';
+
+  const activeSubjects = useMemo(() => {
+    return getSubjectsForClass(subjects, activeClassLevel);
+  }, [subjects, activeClassLevel]);
+
+  // Find assigned subject for Guru Mapel
+  const assignedSubject = useMemo(() => {
+    if (!isGuruMapel || !currentUser) return null;
+    return (
+      activeSubjects.find(
+        (s) =>
+          s.id === currentUser.assignedSubjectId ||
+          (currentUser.assignedSubjectName && s.name.toLowerCase() === currentUser.assignedSubjectName.toLowerCase()) ||
+          (currentUser.assignedSubjectName && s.name.toLowerCase().includes(currentUser.assignedSubjectName.toLowerCase())) ||
+          (currentUser.assignedSubjectName && currentUser.assignedSubjectName.toLowerCase().includes(s.name.toLowerCase()))
+      ) ||
+      activeSubjects.find((s) => {
+        const mapelName = (currentUser.assignedSubjectName || '').toLowerCase();
+        if (mapelName.includes('pjok') || mapelName.includes('olahraga')) {
+          return s.name.toLowerCase().includes('olahraga') || s.name.toLowerCase().includes('pjok');
+        }
+        if (mapelName.includes('agama') || mapelName.includes('pai') || mapelName.includes('islam')) {
+          return s.name.toLowerCase().includes('agama') || s.id === 'mapel-1';
+        }
+        if (mapelName.includes('inggris')) {
+          return s.name.toLowerCase().includes('inggris');
+        }
+        return false;
+      }) ||
+      null
+    );
+  }, [isGuruMapel, currentUser, activeSubjects]);
+
+  const displayedSubjects = useMemo(() => {
+    if (isGuruMapel) {
+      return assignedSubject ? [assignedSubject] : [];
+    }
+    return activeSubjects;
+  }, [isGuruMapel, assignedSubject, activeSubjects]);
 
   const [selectedSubjectId, setSelectedSubjectId] = useState<string>(() => {
+    if (isGuruMapel && assignedSubject) return assignedSubject.id;
     return activeSubjects[0]?.id || subjects[0]?.id || 'mapel-1';
   });
 
-  React.useEffect(() => {
-    if (activeSubjects.length > 0 && !activeSubjects.some((s) => s.id === selectedSubjectId)) {
-      setSelectedSubjectId(activeSubjects[0].id);
+  useEffect(() => {
+    if (isGuruMapel && assignedSubject) {
+      setSelectedSubjectId(assignedSubject.id);
+      return;
     }
-  }, [activeClassLevel, activeSubjects, selectedSubjectId]);
+    if (displayedSubjects.length > 0 && !displayedSubjects.some((s) => s.id === selectedSubjectId)) {
+      setSelectedSubjectId(displayedSubjects[0].id);
+    }
+  }, [activeClassLevel, isGuruMapel, assignedSubject, displayedSubjects, selectedSubjectId]);
 
   const [isAddingTP, setIsAddingTP] = useState<boolean>(false);
   const [newTPCode, setNewTPCode] = useState<string>('');
@@ -155,23 +205,54 @@ export const BankTPView: React.FC<BankTPViewProps> = ({
               {currentFase}
             </span>
           </div>
-          <div className="flex items-center gap-1.5 bg-gray-100 dark:bg-slate-800 p-1 rounded-2xl overflow-x-auto">
-            {classLevels.map((lvl) => {
-              const isActive = lvl === activeClassLevel;
-              return (
-                <button
-                  key={lvl}
-                  onClick={() => onSelectClassLevel(lvl)}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer ${
-                    isActive
-                      ? 'bg-[#4F46E5] text-white shadow-xs scale-[1.02]'
-                      : 'text-gray-700 dark:text-slate-300 hover:text-indigo-700 dark:hover:text-white hover:bg-white/80 dark:hover:bg-slate-700'
-                  }`}
-                >
-                  {lvl}
-                </button>
-              );
-            })}
+          {isWaliKelas ? (
+            <div className="flex items-center gap-2 bg-amber-100/90 dark:bg-amber-950/60 border-2 border-amber-300 dark:border-amber-700 text-amber-900 dark:text-amber-200 px-4 py-2 rounded-2xl text-xs font-black shadow-xs">
+              <Lock className="w-4 h-4 text-amber-700 dark:text-amber-400 shrink-0" />
+              <span>{currentUser?.assignedClass || activeClassLevel} (Terkunci Khusus Wali Kelas)</span>
+            </div>
+          ) : (
+            <div className="flex items-center gap-1.5 bg-gray-100 dark:bg-slate-800 p-1 rounded-2xl overflow-x-auto">
+              {classLevels.map((lvl) => {
+                const isActive = lvl === activeClassLevel;
+                return (
+                  <button
+                    key={lvl}
+                    onClick={() => onSelectClassLevel(lvl)}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer ${
+                      isActive
+                        ? 'bg-[#4F46E5] text-white shadow-xs scale-[1.02]'
+                        : 'text-gray-700 dark:text-slate-300 hover:text-indigo-700 dark:hover:text-white hover:bg-white/80 dark:hover:bg-slate-700'
+                    }`}
+                  >
+                    {lvl}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Guru Mapel Role Banner */}
+      {isGuruMapel && (
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 bg-teal-50 dark:bg-teal-950/40 rounded-2xl border-2 border-teal-300 dark:border-teal-700 text-xs shadow-xs animate-fadeIn">
+          <div className="flex items-center gap-2.5">
+            <div className="w-9 h-9 rounded-xl bg-teal-600 text-white flex items-center justify-center font-black shrink-0 shadow-xs">
+              <BookOpen className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="font-black text-teal-950 dark:text-teal-200 text-xs sm:text-sm">
+                  Bank TP Guru Mapel: {assignedSubject ? assignedSubject.name : currentUser?.assignedSubjectName || 'Mapel Khusus'}
+                </span>
+                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black bg-teal-600 text-white flex items-center gap-1">
+                  <Lock className="w-2.5 h-2.5" /> Terkunci Mapel Anda
+                </span>
+              </div>
+              <p className="text-[11px] text-teal-800/90 dark:text-teal-300/90 font-medium mt-0.5">
+                Anda mengelola bank tujuan pembelajaran (TP) khusus untuk mata pelajaran {assignedSubject?.name || currentUser?.assignedSubjectName}. TP ini otomatis digunakan pada lembar penilaian buku nilai untuk setiap kelas.
+              </p>
+            </div>
           </div>
         </div>
       )}
@@ -191,10 +272,10 @@ export const BankTPView: React.FC<BankTPViewProps> = ({
         <div className="lg:col-span-4 space-y-2">
           <div className="bg-white dark:bg-slate-900 rounded-[32px] border-2 border-indigo-100 dark:border-slate-800 shadow-xs p-5 space-y-2">
             <h3 className="font-black text-xs text-gray-400 dark:text-slate-500 uppercase tracking-wider mb-2">
-              Daftar Mata Pelajaran ({activeSubjects.length} Mapel)
+              Daftar Mata Pelajaran {isGuruMapel ? '(Terkunci Mapel Anda)' : `(${displayedSubjects.length} Mapel)`}
             </h3>
             <div className="space-y-2">
-              {activeSubjects.map((subj) => {
+              {displayedSubjects.map((subj) => {
                 const isSelected = subj.id === selectedSubjectId;
                 return (
                   <button

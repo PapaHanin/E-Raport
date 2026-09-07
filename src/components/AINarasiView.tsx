@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { MataPelajaran, NilaiSiswaMapel, SchoolProfile, Student, TujuanPembelajaran, ClassLevel, getFaseByClass, isIPASActiveForClass } from '../types';
+import React, { useState, useEffect, useMemo } from 'react';
+import { MataPelajaran, NilaiSiswaMapel, SchoolProfile, Student, TujuanPembelajaran, ClassLevel, getFaseByClass, isIPASActiveForClass, TeacherAccount } from '../types';
 import { findExtremeTPs, generateDefaultNarasi } from '../utils/calculator';
 import { getSubjectsForClass } from '../data/initialData';
 import {
@@ -20,6 +20,7 @@ import {
   FileText,
   GraduationCap,
   Info,
+  Lock,
 } from 'lucide-react';
 
 interface AINarasiViewProps {
@@ -28,6 +29,7 @@ interface AINarasiViewProps {
   grades: NilaiSiswaMapel[];
   schoolProfile: SchoolProfile;
   activeClassLevel?: ClassLevel;
+  currentUser?: TeacherAccount | null;
   onSelectClassLevel?: (classLevel: ClassLevel) => void;
   initialStudentId?: string;
   initialSubjectId?: string;
@@ -41,6 +43,7 @@ export const AINarasiView: React.FC<AINarasiViewProps> = ({
   grades,
   schoolProfile,
   activeClassLevel = 'Kelas 4',
+  currentUser,
   onSelectClassLevel,
   initialStudentId,
   initialSubjectId,
@@ -51,20 +54,65 @@ export const AINarasiView: React.FC<AINarasiViewProps> = ({
   const currentFase = getFaseByClass(activeClassLevel);
   const isIPASVisible = isIPASActiveForClass(activeClassLevel);
 
+  // Role checks
+  const isGuruMapel = currentUser?.role === 'guru_mapel';
+  const isWaliKelas = currentUser?.role === 'guru_wali_kelas';
+
   // Filter students by active class
-  const classStudents = students.filter(
-    (std) => std.gradeLevel === activeClassLevel || (!std.gradeLevel && activeClassLevel === 'Kelas 4')
-  );
+  const classStudents = useMemo(() => {
+    return students.filter(
+      (std) => std.gradeLevel === activeClassLevel || (!std.gradeLevel && activeClassLevel === 'Kelas 4')
+    );
+  }, [students, activeClassLevel]);
 
   // Filter subjects by active class (IPAS excluded for Kelas 1 & 2)
-  const activeClassSubjects = getSubjectsForClass(subjects, activeClassLevel);
+  const activeClassSubjects = useMemo(() => {
+    return getSubjectsForClass(subjects, activeClassLevel);
+  }, [subjects, activeClassLevel]);
+
+  // Find assigned subject for Guru Mapel
+  const assignedSubject = useMemo(() => {
+    if (!isGuruMapel || !currentUser) return null;
+    return (
+      activeClassSubjects.find(
+        (s) =>
+          s.id === currentUser.assignedSubjectId ||
+          (currentUser.assignedSubjectName && s.name.toLowerCase() === currentUser.assignedSubjectName.toLowerCase()) ||
+          (currentUser.assignedSubjectName && s.name.toLowerCase().includes(currentUser.assignedSubjectName.toLowerCase())) ||
+          (currentUser.assignedSubjectName && currentUser.assignedSubjectName.toLowerCase().includes(s.name.toLowerCase()))
+      ) ||
+      activeClassSubjects.find((s) => {
+        const mapelName = (currentUser.assignedSubjectName || '').toLowerCase();
+        if (mapelName.includes('pjok') || mapelName.includes('olahraga')) {
+          return s.name.toLowerCase().includes('olahraga') || s.name.toLowerCase().includes('pjok');
+        }
+        if (mapelName.includes('agama') || mapelName.includes('pai') || mapelName.includes('islam')) {
+          return s.name.toLowerCase().includes('agama') || s.id === 'mapel-1';
+        }
+        if (mapelName.includes('inggris')) {
+          return s.name.toLowerCase().includes('inggris');
+        }
+        return false;
+      }) ||
+      null
+    );
+  }, [isGuruMapel, currentUser, activeClassSubjects]);
+
+  // Subjects displayed in the selector: LOCKED for Guru Mapel
+  const displayedSubjects = useMemo(() => {
+    if (isGuruMapel) {
+      return assignedSubject ? [assignedSubject] : [];
+    }
+    return activeClassSubjects;
+  }, [isGuruMapel, assignedSubject, activeClassSubjects]);
 
   const [selectedStudentId, setSelectedStudentId] = useState<string>(
     initialStudentId || classStudents[0]?.id || students[0]?.id || 'std-1'
   );
-  const [selectedSubjectId, setSelectedSubjectId] = useState<string>(
-    initialSubjectId || activeClassSubjects[0]?.id || 'mapel-1'
-  );
+  const [selectedSubjectId, setSelectedSubjectId] = useState<string>(() => {
+    if (isGuruMapel && assignedSubject) return assignedSubject.id;
+    return initialSubjectId || activeClassSubjects[0]?.id || 'mapel-1';
+  });
 
   // Keep selected values valid on class level switch
   useEffect(() => {
@@ -74,10 +122,14 @@ export const AINarasiView: React.FC<AINarasiViewProps> = ({
   }, [activeClassLevel, classStudents, selectedStudentId]);
 
   useEffect(() => {
-    if (activeClassSubjects.length > 0 && !activeClassSubjects.some((s) => s.id === selectedSubjectId)) {
-      setSelectedSubjectId(activeClassSubjects[0].id);
+    if (isGuruMapel && assignedSubject) {
+      setSelectedSubjectId(assignedSubject.id);
+      return;
     }
-  }, [activeClassLevel, activeClassSubjects, selectedSubjectId]);
+    if (displayedSubjects.length > 0 && !displayedSubjects.some((s) => s.id === selectedSubjectId)) {
+      setSelectedSubjectId(displayedSubjects[0].id);
+    }
+  }, [activeClassLevel, isGuruMapel, assignedSubject, displayedSubjects, selectedSubjectId]);
 
   const [selectedTone, setSelectedTone] = useState<'standar' | 'hangat' | 'ringkas'>('standar');
   const [customTeacherNotes, setCustomTeacherNotes] = useState<string>('');
@@ -193,12 +245,12 @@ export const AINarasiView: React.FC<AINarasiViewProps> = ({
 
   // Start Batch Generation for all students in selected subject
   const handleStartBatchGeneration = async () => {
-    const targetSubj = subjects.find((s) => s.id === batchSubjectId) || currentSubject;
+    const targetSubj = displayedSubjects.find((s) => s.id === batchSubjectId) || displayedSubjects[0] || currentSubject;
     setIsBatchRunning(true);
     setBatchProgress(10);
     setBatchResults([]);
 
-    const itemsToGenerate = students.map((std) => {
+    const itemsToGenerate = classStudents.map((std) => {
       const g = grades.find((gr) => gr.studentId === std.id && gr.subjectId === targetSubj.id);
       const { highest, lowest } = findExtremeTPs(g?.sumatifLM || []);
       return {
@@ -216,7 +268,7 @@ export const AINarasiView: React.FC<AINarasiViewProps> = ({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           items: itemsToGenerate,
-          gradeLevel: 'Kelas 4 SD',
+          gradeLevel: `${activeClassLevel} SD`,
           subjectName: targetSubj.name,
           tone: selectedTone,
         }),
@@ -225,7 +277,7 @@ export const AINarasiView: React.FC<AINarasiViewProps> = ({
       setBatchProgress(80);
       const data = await response.json();
       const resultsWithNames = (data.results || []).map((res: any) => {
-        const std = students.find((s) => s.id === res.studentId);
+        const std = classStudents.find((s) => s.id === res.studentId);
         return {
           studentId: res.studentId,
           studentName: std?.name || 'Siswa',
@@ -307,6 +359,37 @@ export const AINarasiView: React.FC<AINarasiViewProps> = ({
         </div>
       </div>
 
+      {/* Guru Mapel Portal Banner */}
+      {isGuruMapel && (
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 bg-teal-50 dark:bg-teal-950/40 rounded-2xl border-2 border-teal-300 dark:border-teal-700 text-xs shadow-xs animate-fadeIn">
+          <div className="flex items-center gap-2.5">
+            <div className="w-9 h-9 rounded-xl bg-teal-600 text-white flex items-center justify-center font-black shrink-0 shadow-xs">
+              <BookOpen className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="font-black text-teal-950 dark:text-teal-200 text-xs sm:text-sm">
+                  Portal AI Narasi Guru Mapel: {assignedSubject ? assignedSubject.name : currentUser?.assignedSubjectName || 'Mapel Khusus'}
+                </span>
+                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black bg-teal-600 text-white flex items-center gap-1">
+                  <Lock className="w-2.5 h-2.5" />
+                  Terkunci Mapel Ini
+                </span>
+              </div>
+              <p className="text-[11px] text-teal-800/90 dark:text-teal-300/90 font-medium mt-0.5">
+                Anda hanya dapat menyusun dan meng-generate narasi AI untuk mata pelajaran {assignedSubject?.name || currentUser?.assignedSubjectName}. Narasi yang Anda simpan otomatis langsung terbaca oleh Wali Kelas dan tercetak di e-Rapor.
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <span className="text-xs font-bold text-teal-800 dark:text-teal-200 bg-white/90 dark:bg-slate-800/90 px-3 py-1.5 rounded-xl border border-teal-200 dark:border-teal-700 flex items-center gap-1.5 shadow-2xs">
+              <Check className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
+              <span>Otomatis Tersinkron ke Rapor</span>
+            </span>
+          </div>
+        </div>
+      )}
+
       {/* Main 2-Column Generator Workspace */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         {/* Left Column: Input Data & TP Controls (5 cols) */}
@@ -329,15 +412,22 @@ export const AINarasiView: React.FC<AINarasiViewProps> = ({
                   Pilih Peserta Didik ({activeClassLevel})
                 </label>
                 {onSelectClassLevel && (
-                  <select
-                    value={activeClassLevel}
-                    onChange={(e) => onSelectClassLevel(e.target.value as ClassLevel)}
-                    className="text-[11px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 rounded-xl px-2 py-0.5"
-                  >
-                    {classLevels.map((lvl) => (
-                      <option key={lvl} value={lvl}>{lvl}</option>
-                    ))}
-                  </select>
+                  isWaliKelas ? (
+                    <span className="text-[11px] font-black text-amber-800 dark:text-amber-300 bg-amber-100 dark:bg-amber-950/60 border border-amber-300 px-2.5 py-0.5 rounded-lg flex items-center gap-1">
+                      <Lock className="w-2.5 h-2.5" />
+                      {currentUser?.assignedClass || activeClassLevel} (Terkunci)
+                    </span>
+                  ) : (
+                    <select
+                      value={activeClassLevel}
+                      onChange={(e) => onSelectClassLevel(e.target.value as ClassLevel)}
+                      className="text-[11px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 rounded-xl px-2 py-0.5"
+                    >
+                      {classLevels.map((lvl) => (
+                        <option key={lvl} value={lvl}>{lvl}</option>
+                      ))}
+                    </select>
+                  )
                 )}
               </div>
               <select
@@ -361,22 +451,44 @@ export const AINarasiView: React.FC<AINarasiViewProps> = ({
 
             {/* Select Subject */}
             <div>
-              <label className="block text-xs font-bold text-gray-700 mb-1.5">
-                Mata Pelajaran ({activeClassSubjects.length} Mapel Aktif)
-              </label>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="block text-xs font-bold text-gray-700">
+                  Mata Pelajaran {isGuruMapel ? '(Terkunci)' : `(${displayedSubjects.length} Mapel Aktif)`}
+                </label>
+                {isGuruMapel && (
+                  <span className="text-[10px] font-black bg-teal-100 text-teal-800 px-2 py-0.5 rounded-full flex items-center gap-1">
+                    <Lock className="w-2.5 h-2.5" /> Terkunci Mapel Anda
+                  </span>
+                )}
+              </div>
               <select
                 id="select-subject-ai"
                 value={selectedSubjectId}
                 onChange={(e) => setSelectedSubjectId(e.target.value)}
-                className="w-full text-xs font-bold text-gray-900 bg-gray-50 border-2 border-gray-200 rounded-2xl p-3 focus:ring-2 focus:ring-indigo-500 focus:bg-white"
+                disabled={isGuruMapel}
+                className={`w-full text-xs font-bold rounded-2xl p-3 border-2 transition-all ${
+                  isGuruMapel
+                    ? 'text-teal-900 bg-teal-50 border-teal-300 cursor-not-allowed'
+                    : 'text-gray-900 bg-gray-50 border-gray-200 focus:ring-2 focus:ring-indigo-500 focus:bg-white'
+                }`}
               >
-                {activeClassSubjects.map((subj) => (
+                {displayedSubjects.map((subj) => (
                   <option key={subj.id} value={subj.id}>
                     {subj.name} ({subj.tujuanPembelajaran.length} TP)
                   </option>
                 ))}
               </select>
             </div>
+
+            {/* Informative banner for Wali Kelas when inspecting Guru Mapel's Subject */}
+            {isWaliKelas && (currentSubject?.name.toLowerCase().includes('olahraga') || currentSubject?.name.toLowerCase().includes('pjok') || currentSubject?.name.toLowerCase().includes('agama') || currentSubject?.name.toLowerCase().includes('inggris')) && (
+              <div className="flex items-center gap-2 p-2.5 bg-teal-50 dark:bg-teal-950/40 rounded-xl border border-teal-200 text-[11px] text-teal-900 dark:text-teal-200 font-medium">
+                <Info className="w-4 h-4 text-teal-600 shrink-0" />
+                <span>
+                  Narasi mapel <strong>{currentSubject?.name}</strong> ini dapat diinput/di-generate langsung oleh Guru Mapel bersangkutan.
+                </span>
+              </div>
+            )}
 
             {/* Highest TP Selection */}
             <div className="space-y-1.5">
@@ -684,17 +796,29 @@ export const AINarasiView: React.FC<AINarasiViewProps> = ({
             {/* Modal Body */}
             <div className="p-6 overflow-y-auto space-y-4 flex-1">
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                  Pilih Mata Pelajaran Target:
-                </label>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="block text-xs font-bold text-slate-700">
+                    Pilih Mata Pelajaran Target:
+                  </label>
+                  {isGuruMapel && (
+                    <span className="text-[10px] font-black bg-teal-100 text-teal-800 px-2 py-0.5 rounded-full flex items-center gap-1">
+                      <Lock className="w-2.5 h-2.5" /> Terkunci Mapel Anda
+                    </span>
+                  )}
+                </div>
                 <select
                   value={batchSubjectId}
                   onChange={(e) => setBatchSubjectId(e.target.value)}
-                  className="w-full text-xs font-bold p-2.5 border border-slate-300 rounded-lg bg-slate-50 focus:bg-white"
+                  disabled={isGuruMapel}
+                  className={`w-full text-xs font-bold p-2.5 border rounded-lg ${
+                    isGuruMapel
+                      ? 'bg-teal-50 border-teal-300 text-teal-900 cursor-not-allowed'
+                      : 'border-slate-300 bg-slate-50 focus:bg-white'
+                  }`}
                 >
-                  {subjects.map((subj) => (
+                  {displayedSubjects.map((subj) => (
                     <option key={subj.id} value={subj.id}>
-                      {subj.name} ({students.length} Siswa)
+                      {subj.name} ({classStudents.length} Siswa {activeClassLevel})
                     </option>
                   ))}
                 </select>
@@ -704,7 +828,7 @@ export const AINarasiView: React.FC<AINarasiViewProps> = ({
                 <div className="text-center py-8 space-y-3">
                   <RotateCw className="w-8 h-8 text-violet-600 animate-spin mx-auto" />
                   <p className="font-bold text-sm text-slate-800">
-                    Gemini AI sedang menyusun narasi untuk {students.length} siswa...
+                    Gemini AI sedang menyusun narasi untuk {classStudents.length} siswa ({activeClassLevel})...
                   </p>
                   <div className="w-full max-w-md mx-auto bg-slate-100 h-2 rounded-full overflow-hidden">
                     <div
